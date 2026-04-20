@@ -607,4 +607,239 @@ mixin (
     Lib.bulkUpsertQueueEntries(engineState, role, caller.toText(), entries);
   };
 
+  // ─── Full Sync Bootstrap API ───────────────────────────────────────────────
+
+  public query ({ caller }) func getFullSyncData(
+    doctorEmail : Text
+  ) : async { #ok : Types.SyncData; #err : Text } {
+    let role = getCallerRole(caller);
+    Lib.getFullSyncData(engineState, role, caller.toText(), doctorEmail);
+  };
+
+  public query func getLastSyncTimestamp() : async Int {
+    Lib.getLastSyncTimestamp();
+  };
+
+  // ─── Handover API ──────────────────────────────────────────────────────────
+
+  public shared ({ caller }) func createHandover(
+    patientId : Nat,
+    shift : Types.HandoverShift,
+    shiftStartTime : Int,
+    shiftEndTime : Int,
+    patientName : Text,
+    registerNumber : ?Text,
+    ward : ?Text,
+    bedNumber : ?Text,
+    diagnosis : ?Text,
+    dayOfStay : ?Nat,
+    currentConsultant : ?Text,
+    clinicalSummary : Text,
+    vitalsSummary : ?Text,
+    actionableItems : [Text],
+    tasksPending : [Text],
+    pendingInvestigations : [Text],
+    pendingProcedures : [Text],
+    missedMedications : [Text],
+  ) : async { #ok : Types.HandoverEntry; #err : Text } {
+    let role = getCallerRole(caller);
+    if (not Lib.isClinician(role)) {
+      return #err("Unauthorized: only clinicians can create handovers");
+    };
+    let entry = Lib.createHandover(
+      engineState, caller, caller.toText(), role,
+      patientId, shift, shiftStartTime, shiftEndTime,
+      patientName, registerNumber, ward, bedNumber, diagnosis, dayOfStay, currentConsultant,
+      clinicalSummary, vitalsSummary, actionableItems, tasksPending,
+      pendingInvestigations, pendingProcedures, missedMedications,
+    );
+    #ok(entry);
+  };
+
+  public query ({ caller }) func getHandover(
+    id : Nat
+  ) : async ?Types.HandoverEntry {
+    Lib.getHandover(engineState, id);
+  };
+
+  public query ({ caller }) func getHandoversByPatientId(
+    patientId : Nat
+  ) : async [Types.HandoverEntry] {
+    Lib.getHandoversByPatientId(engineState, patientId);
+  };
+
+  public shared ({ caller }) func updateHandover(
+    id : Nat,
+    clinicalSummary : Text,
+    vitalsSummary : ?Text,
+    actionableItems : [Text],
+    tasksPending : [Text],
+    pendingInvestigations : [Text],
+    pendingProcedures : [Text],
+    missedMedications : [Text],
+    takenByName : ?Text,
+    takenByRole : ?Types.StaffRole,
+    takenByPrincipal : ?Principal,
+    consultantComment : ?Text,
+    status : Types.HandoverStatus,
+  ) : async { #ok : Types.HandoverEntry; #err : Text } {
+    let role = getCallerRole(caller);
+    if (not Lib.isClinician(role)) {
+      return #err("Unauthorized: only clinicians can update handovers");
+    };
+    let entry = Lib.updateHandover(
+      engineState, caller, caller.toText(), role,
+      id, clinicalSummary, vitalsSummary, actionableItems, tasksPending,
+      pendingInvestigations, pendingProcedures, missedMedications,
+      takenByName, takenByRole, takenByPrincipal,
+      consultantComment, status,
+    );
+    #ok(entry);
+  };
+
+  // ─── Daily Progress Note API ───────────────────────────────────────────────
+
+  public shared ({ caller }) func createDailyProgressNote(
+    patientId : Nat,
+    encounterId : ?Nat,
+    progressType : Types.DailyProgressType,
+    noteDate : Text,
+    subjectiveComplaints : [Text],
+    systemReview : ?Text,
+    objectiveVitals : ?Text,
+    intakeOutput : ?Text,
+    drainMonitoring : ?Text,
+    investigations : [Text],
+    assessmentText : Text,
+    planText : Text,
+    activeComplaints : [Text],
+    activeDiagnoses : [Text],
+    isDraft : Bool,
+  ) : async { #ok : Types.DailyProgressNote; #err : Text } {
+    let role = getCallerRole(caller);
+    if (not Lib.isClinician(role)) {
+      return #err("Unauthorized: only clinicians can create daily progress notes");
+    };
+    let note = Lib.createDailyProgressNote(
+      engineState, caller, caller.toText(), role,
+      patientId, encounterId, progressType, noteDate,
+      subjectiveComplaints, systemReview, objectiveVitals,
+      intakeOutput, drainMonitoring, investigations,
+      assessmentText, planText, activeComplaints, activeDiagnoses, isDraft,
+    );
+    #ok(note);
+  };
+
+  public query ({ caller }) func getDailyProgressNotesByPatientId(
+    patientId : Nat
+  ) : async [Types.DailyProgressNote] {
+    Lib.getDailyProgressNotesByPatientId(engineState, patientId);
+  };
+
+  public shared ({ caller }) func updateDailyProgressNote(
+    id : Nat,
+    subjectiveComplaints : [Text],
+    systemReview : ?Text,
+    objectiveVitals : ?Text,
+    intakeOutput : ?Text,
+    drainMonitoring : ?Text,
+    investigations : [Text],
+    assessmentText : Text,
+    planText : Text,
+    activeComplaints : [Text],
+    activeDiagnoses : [Text],
+    isDraft : Bool,
+    changeReason : ?Text,
+  ) : async { #ok : Types.DailyProgressNote; #err : Text } {
+    let role = getCallerRole(caller);
+    if (not Lib.isClinician(role)) {
+      return #err("Unauthorized: only clinicians can update daily progress notes");
+    };
+    let note = Lib.updateDailyProgressNote(
+      engineState, caller, caller.toText(), role,
+      id, subjectiveComplaints, systemReview, objectiveVitals,
+      intakeOutput, drainMonitoring, investigations,
+      assessmentText, planText, activeComplaints, activeDiagnoses,
+      isDraft, changeReason,
+    );
+    #ok(note);
+  };
+
+  // ─── Audit Log wrappers (required by contract) ────────────────────────────
+
+  public shared ({ caller }) func addAuditEntry(
+    entityType : Text,
+    entityId : Nat,
+    fieldName : Text,
+    beforeValue : ?Text,
+    afterValue : Text,
+    reason : ?Text,
+  ) : async () {
+    let role = getCallerRole(caller);
+    if (not Lib.isClinician(role)) { return };
+    Lib.appendAuditEntry(engineState, entityType, entityId, fieldName, beforeValue, afterValue, caller, caller.toText(), role, reason);
+  };
+
+  public query ({ caller }) func getAuditLog(
+    patientId : Nat,
+    limit : Nat,
+    offset : Nat,
+  ) : async [Types.AuditEntry] {
+    let role = getCallerRole(caller);
+    if (not Lib.canViewAuditTrail(role)) { return [] };
+    Lib.getAuditTrail(engineState, patientId, limit, offset);
+  };
+
+  // ─── Active Alerts / Dismiss ──────────────────────────────────────────────
+
+  public query ({ caller }) func getActiveAlerts(
+    patientId : Nat
+  ) : async [Types.ClinicalAlert] {
+    let role = getCallerRole(caller);
+    if (not Lib.isClinician(role)) { return [] };
+    Lib.getAlertsByPatient(engineState, patientId).filter(func (a) { not a.isResolved });
+  };
+
+  public shared ({ caller }) func dismissAlert(
+    id : Nat
+  ) : async { #ok : Types.ClinicalAlert; #err : Text } {
+    let role = getCallerRole(caller);
+    if (not Lib.isClinician(role)) {
+      return #err("Unauthorized: only clinicians can dismiss alerts");
+    };
+    let alert = Lib.resolveAlert(engineState, caller, id);
+    #ok(alert);
+  };
+
+  // ─── Sync Data wrappers (required by contract) ────────────────────────────
+
+  public query ({ caller }) func syncData(
+    doctorEmail : Text
+  ) : async { #ok : Types.SyncData; #err : Text } {
+    let role = getCallerRole(caller);
+    Lib.getFullSyncData(engineState, role, caller.toText(), doctorEmail);
+  };
+
+  public query ({ caller }) func getUpdatedData(
+    doctorEmail : Text,
+    sinceTimestamp : Int,
+  ) : async { #ok : Types.UpdatedData; #err : Text } {
+    let role = getCallerRole(caller);
+    if (role != #admin and caller.toText() != doctorEmail) {
+      return #err("Unauthorized: can only sync your own data");
+    };
+    let appointments = engineState.appointments.values().filter(func (a) {
+      a.doctorEmail == doctorEmail and a.updatedAt >= sinceTimestamp
+    }).toArray();
+    let queueEntries = engineState.queueEntries.values().filter(func (e) {
+      e.doctorEmail == doctorEmail and e.updatedAt >= sinceTimestamp
+    }).toArray();
+    #ok({
+      patients = [];   // patient IDs included for awareness; full patient list via getAllPatientsSince
+      appointments;
+      queueEntries;
+      timestamp = Lib.getLastSyncTimestamp();
+    });
+  };
+
 };

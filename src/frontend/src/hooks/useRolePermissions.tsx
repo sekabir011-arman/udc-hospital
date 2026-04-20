@@ -97,7 +97,7 @@ export const ROLE_PERMISSIONS: Record<
     canCreateDraftOnly: false,
   },
   medical_officer: {
-    canAccessOutpatient: false,
+    canAccessOutpatient: true,
     canPrescribe: true,
     canDiagnose: true,
     canDischarge: true,
@@ -126,7 +126,7 @@ export const ROLE_PERMISSIONS: Record<
     canCreateDraftOnly: false,
   },
   intern_doctor: {
-    canAccessOutpatient: false,
+    canAccessOutpatient: true,
     canPrescribe: true,
     canDiagnose: true,
     canDischarge: false,
@@ -155,7 +155,7 @@ export const ROLE_PERMISSIONS: Record<
     canCreateDraftOnly: true,
   },
   nurse: {
-    canAccessOutpatient: false,
+    canAccessOutpatient: true,
     canPrescribe: false,
     canDiagnose: false,
     canDischarge: false,

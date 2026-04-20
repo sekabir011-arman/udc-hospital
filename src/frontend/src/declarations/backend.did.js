@@ -134,6 +134,7 @@ export const Patient = IDL.Record({
   'createdAt' : Time,
   'fullName' : IDL.Text,
   'email' : IDL.Opt(IDL.Text),
+  'updatedAt' : Time,
   'pastSurgicalHistory' : IDL.Opt(IDL.Text),
   'bloodGroup' : IDL.Opt(IDL.Text),
   'address' : IDL.Opt(IDL.Text),
@@ -171,6 +172,24 @@ export const Appointment = IDL.Record({
   'doctorEmail' : IDL.Text,
   'timeSlot' : IDL.Opt(IDL.Text),
 });
+export const Medication = IDL.Record({
+  'duration' : IDL.Text,
+  'dose' : IDL.Text,
+  'name' : IDL.Text,
+  'instructions' : IDL.Text,
+  'frequency' : IDL.Text,
+});
+export const Prescription = IDL.Record({
+  'id' : IDL.Nat,
+  'patientId' : IDL.Nat,
+  'createdAt' : Time,
+  'diagnosis' : IDL.Opt(IDL.Text),
+  'prescriptionDate' : Time,
+  'updatedAt' : Time,
+  'medications' : IDL.Vec(Medication),
+  'notes' : IDL.Opt(IDL.Text),
+  'visitId' : IDL.Opt(IDL.Nat),
+});
 export const QueueStatus = IDL.Variant({
   'serving' : IDL.Null,
   'skipped' : IDL.Null,
@@ -184,10 +203,36 @@ export const SerialQueueEntry = IDL.Record({
   'createdAt' : IDL.Int,
   'registerNumber' : IDL.Opt(IDL.Text),
   'calledAt' : IDL.Opt(IDL.Int),
+  'updatedAt' : IDL.Int,
   'serialNumber' : IDL.Nat,
   'patientName' : IDL.Text,
   'phone' : IDL.Opt(IDL.Text),
   'doctorEmail' : IDL.Text,
+});
+export const VitalSigns = IDL.Record({
+  'respiratoryRate' : IDL.Opt(IDL.Text),
+  'temperature' : IDL.Opt(IDL.Text),
+  'bloodPressure' : IDL.Opt(IDL.Text),
+  'oxygenSaturation' : IDL.Opt(IDL.Text),
+  'pulse' : IDL.Opt(IDL.Text),
+});
+export const VisitType = IDL.Variant({
+  'admitted' : IDL.Null,
+  'outdoor' : IDL.Null,
+});
+export const Visit = IDL.Record({
+  'id' : IDL.Nat,
+  'vitalSigns' : VitalSigns,
+  'patientId' : IDL.Nat,
+  'createdAt' : Time,
+  'visitDate' : Time,
+  'visitType' : VisitType,
+  'diagnosis' : IDL.Opt(IDL.Text),
+  'updatedAt' : Time,
+  'historyOfPresentIllness' : IDL.Opt(IDL.Text),
+  'notes' : IDL.Opt(IDL.Text),
+  'physicalExamination' : IDL.Opt(IDL.Text),
+  'chiefComplaint' : IDL.Text,
 });
 export const NoteType = IDL.Variant({
   'SOAP' : IDL.Null,
@@ -212,6 +257,37 @@ export const ClinicalNote = IDL.Record({
   'versionInfo' : VersionedRecord,
   'encounterId' : IDL.Opt(IDL.Nat),
   'noteSubtype' : IDL.Opt(IDL.Text),
+});
+export const DailyProgressType = IDL.Variant({
+  'morning' : IDL.Null,
+  'evening' : IDL.Null,
+  'emergency' : IDL.Null,
+});
+export const DailyProgressNote = IDL.Record({
+  'id' : IDL.Nat,
+  'isDeleted' : IDL.Bool,
+  'drainMonitoring' : IDL.Opt(IDL.Text),
+  'patientId' : IDL.Nat,
+  'authorId' : IDL.Principal,
+  'createdAt' : IDL.Int,
+  'authorName' : IDL.Text,
+  'authorRole' : StaffRole,
+  'noteDate' : IDL.Text,
+  'objectiveVitals' : IDL.Opt(IDL.Text),
+  'assessmentText' : IDL.Text,
+  'subjectiveComplaints' : IDL.Vec(IDL.Text),
+  'isDraft' : IDL.Bool,
+  'updatedAt' : IDL.Int,
+  'activeDiagnoses' : IDL.Vec(IDL.Text),
+  'progressType' : DailyProgressType,
+  'activeComplaints' : IDL.Vec(IDL.Text),
+  'previousVersionIds' : IDL.Vec(IDL.Nat),
+  'versionInfo' : VersionedRecord,
+  'encounterId' : IDL.Opt(IDL.Nat),
+  'planText' : IDL.Text,
+  'systemReview' : IDL.Opt(IDL.Text),
+  'intakeOutput' : IDL.Opt(IDL.Text),
+  'investigations' : IDL.Vec(IDL.Text),
 });
 export const DiagnosisTemplate = IDL.Record({
   'id' : IDL.Nat,
@@ -252,6 +328,49 @@ export const Encounter = IDL.Record({
   'locationNotes' : IDL.Opt(IDL.Text),
   'startDate' : IDL.Int,
 });
+export const HandoverShift = IDL.Variant({
+  'morning' : IDL.Null,
+  'evening' : IDL.Null,
+  'night' : IDL.Null,
+});
+export const HandoverStatus = IDL.Variant({
+  'submitted' : IDL.Null,
+  'draft' : IDL.Null,
+});
+export const HandoverEntry = IDL.Record({
+  'id' : IDL.Nat,
+  'status' : HandoverStatus,
+  'takenByName' : IDL.Opt(IDL.Text),
+  'takenByRole' : IDL.Opt(StaffRole),
+  'clinicalSummary' : IDL.Text,
+  'currentConsultant' : IDL.Opt(IDL.Text),
+  'consultantComment' : IDL.Opt(IDL.Text),
+  'patientId' : IDL.Nat,
+  'dayOfStay' : IDL.Opt(IDL.Nat),
+  'createdAt' : IDL.Int,
+  'ward' : IDL.Opt(IDL.Text),
+  'pendingInvestigations' : IDL.Vec(IDL.Text),
+  'vitalsSummary' : IDL.Opt(IDL.Text),
+  'bedNumber' : IDL.Opt(IDL.Text),
+  'registerNumber' : IDL.Opt(IDL.Text),
+  'diagnosis' : IDL.Opt(IDL.Text),
+  'missedMedications' : IDL.Vec(IDL.Text),
+  'shift' : HandoverShift,
+  'updatedAt' : IDL.Int,
+  'givenByPrincipal' : IDL.Principal,
+  'givenByName' : IDL.Text,
+  'consultantCommentAt' : IDL.Opt(IDL.Int),
+  'consultantCommentBy' : IDL.Opt(IDL.Principal),
+  'givenByRole' : StaffRole,
+  'takenByPrincipal' : IDL.Opt(IDL.Principal),
+  'patientName' : IDL.Text,
+  'shiftEndTime' : IDL.Int,
+  'pendingProcedures' : IDL.Vec(IDL.Text),
+  'tasksPending' : IDL.Vec(IDL.Text),
+  'versionInfo' : VersionedRecord,
+  'shiftStartTime' : IDL.Int,
+  'actionableItems' : IDL.Vec(IDL.Text),
+});
 export const OrderType = IDL.Variant({
   'Medication' : IDL.Null,
   'Procedure' : IDL.Null,
@@ -282,47 +401,6 @@ export const ClinicalOrder = IDL.Record({
   'versionInfo' : VersionedRecord,
   'encounterId' : IDL.Opt(IDL.Nat),
 });
-export const Medication = IDL.Record({
-  'duration' : IDL.Text,
-  'dose' : IDL.Text,
-  'name' : IDL.Text,
-  'instructions' : IDL.Text,
-  'frequency' : IDL.Text,
-});
-export const Prescription = IDL.Record({
-  'id' : IDL.Nat,
-  'patientId' : IDL.Nat,
-  'createdAt' : Time,
-  'diagnosis' : IDL.Opt(IDL.Text),
-  'prescriptionDate' : Time,
-  'medications' : IDL.Vec(Medication),
-  'notes' : IDL.Opt(IDL.Text),
-  'visitId' : IDL.Opt(IDL.Nat),
-});
-export const VitalSigns = IDL.Record({
-  'respiratoryRate' : IDL.Opt(IDL.Text),
-  'temperature' : IDL.Opt(IDL.Text),
-  'bloodPressure' : IDL.Opt(IDL.Text),
-  'oxygenSaturation' : IDL.Opt(IDL.Text),
-  'pulse' : IDL.Opt(IDL.Text),
-});
-export const VisitType = IDL.Variant({
-  'admitted' : IDL.Null,
-  'outdoor' : IDL.Null,
-});
-export const Visit = IDL.Record({
-  'id' : IDL.Nat,
-  'vitalSigns' : VitalSigns,
-  'patientId' : IDL.Nat,
-  'createdAt' : Time,
-  'visitDate' : Time,
-  'visitType' : VisitType,
-  'diagnosis' : IDL.Opt(IDL.Text),
-  'historyOfPresentIllness' : IDL.Opt(IDL.Text),
-  'notes' : IDL.Opt(IDL.Text),
-  'physicalExamination' : IDL.Opt(IDL.Text),
-  'chiefComplaint' : IDL.Text,
-});
 export const AuditEntry = IDL.Record({
   'id' : IDL.Nat,
   'changedByName' : IDL.Text,
@@ -341,6 +419,17 @@ export const UserProfile = IDL.Record({ 'name' : IDL.Text });
 export const CurrentUser = IDL.Record({
   'principal' : IDL.Principal,
   'role' : UserRole,
+});
+export const SyncData = IDL.Record({
+  'queueEntries' : IDL.Vec(SerialQueueEntry),
+  'appointments' : IDL.Vec(Appointment),
+  'timestamp' : IDL.Int,
+});
+export const UpdatedData = IDL.Record({
+  'queueEntries' : IDL.Vec(SerialQueueEntry),
+  'appointments' : IDL.Vec(Appointment),
+  'timestamp' : IDL.Int,
+  'patients' : IDL.Vec(IDL.Nat),
 });
 export const SyncRecord = IDL.Record({
   'id' : IDL.Nat,
@@ -364,6 +453,18 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : Observation, 'err' : IDL.Text })],
       [],
     ),
+  'addAuditEntry' : IDL.Func(
+      [
+        IDL.Text,
+        IDL.Nat,
+        IDL.Text,
+        IDL.Opt(IDL.Text),
+        IDL.Text,
+        IDL.Opt(IDL.Text),
+      ],
+      [],
+      [],
+    ),
   'assignBed' : IDL.Func(
       [IDL.Nat, IDL.Nat, IDL.Text],
       [IDL.Variant({ 'ok' : BedRecord, 'err' : IDL.Text })],
@@ -376,11 +477,18 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
       [],
     ),
+  'bulkUpsertPatients' : IDL.Func([IDL.Vec(Patient)], [IDL.Vec(Patient)], []),
+  'bulkUpsertPrescriptions' : IDL.Func(
+      [IDL.Vec(Prescription)],
+      [IDL.Vec(Prescription)],
+      [],
+    ),
   'bulkUpsertQueueEntries' : IDL.Func(
       [IDL.Vec(SerialQueueEntry)],
       [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
       [],
     ),
+  'bulkUpsertVisits' : IDL.Func([IDL.Vec(Visit)], [IDL.Vec(Visit)], []),
   'clearQueueByDate' : IDL.Func(
       [IDL.Text, IDL.Text],
       [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
@@ -428,6 +536,27 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : ClinicalNote, 'err' : IDL.Text })],
       [],
     ),
+  'createDailyProgressNote' : IDL.Func(
+      [
+        IDL.Nat,
+        IDL.Opt(IDL.Nat),
+        DailyProgressType,
+        IDL.Text,
+        IDL.Vec(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Text,
+        IDL.Text,
+        IDL.Vec(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Bool,
+      ],
+      [IDL.Variant({ 'ok' : DailyProgressNote, 'err' : IDL.Text })],
+      [],
+    ),
   'createDiagnosisTemplate' : IDL.Func(
       [
         IDL.Text,
@@ -444,6 +573,30 @@ export const idlService = IDL.Service({
   'createEncounter' : IDL.Func(
       [IDL.Nat, EncounterType, IDL.Opt(IDL.Text)],
       [IDL.Variant({ 'ok' : Encounter, 'err' : IDL.Text })],
+      [],
+    ),
+  'createHandover' : IDL.Func(
+      [
+        IDL.Nat,
+        HandoverShift,
+        IDL.Int,
+        IDL.Int,
+        IDL.Text,
+        IDL.Opt(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Opt(IDL.Nat),
+        IDL.Opt(IDL.Text),
+        IDL.Text,
+        IDL.Opt(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Vec(IDL.Text),
+      ],
+      [IDL.Variant({ 'ok' : HandoverEntry, 'err' : IDL.Text })],
       [],
     ),
   'createObservation' : IDL.Func(
@@ -556,6 +709,12 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : BedRecord, 'err' : IDL.Text })],
       [],
     ),
+  'dismissAlert' : IDL.Func(
+      [IDL.Nat],
+      [IDL.Variant({ 'ok' : ClinicalAlert, 'err' : IDL.Text })],
+      [],
+    ),
+  'getActiveAlerts' : IDL.Func([IDL.Nat], [IDL.Vec(ClinicalAlert)], ['query']),
   'getActiveOrdersByPatient' : IDL.Func(
       [IDL.Nat],
       [IDL.Vec(ClinicalOrder)],
@@ -584,8 +743,15 @@ export const idlService = IDL.Service({
     ),
   'getAllEncounters' : IDL.Func([], [IDL.Vec(Encounter)], ['query']),
   'getAllPatients' : IDL.Func([], [IDL.Vec(Patient)], ['query']),
+  'getAllPatientsSince' : IDL.Func([IDL.Int], [IDL.Vec(Patient)], ['query']),
   'getAllPrescriptions' : IDL.Func([], [IDL.Vec(Prescription)], ['query']),
+  'getAllPrescriptionsSince' : IDL.Func(
+      [IDL.Int],
+      [IDL.Vec(Prescription)],
+      ['query'],
+    ),
   'getAllVisits' : IDL.Func([], [IDL.Vec(Visit)], ['query']),
+  'getAllVisitsSince' : IDL.Func([IDL.Int], [IDL.Vec(Visit)], ['query']),
   'getAppointmentById' : IDL.Func(
       [IDL.Text],
       [IDL.Variant({ 'ok' : IDL.Opt(Appointment), 'err' : IDL.Text })],
@@ -599,6 +765,11 @@ export const idlService = IDL.Service({
   'getAppointmentsSince' : IDL.Func(
       [IDL.Text, IDL.Int],
       [IDL.Variant({ 'ok' : IDL.Vec(Appointment), 'err' : IDL.Text })],
+      ['query'],
+    ),
+  'getAuditLog' : IDL.Func(
+      [IDL.Nat, IDL.Nat, IDL.Nat],
+      [IDL.Vec(AuditEntry)],
       ['query'],
     ),
   'getAuditTrail' : IDL.Func(
@@ -620,6 +791,11 @@ export const idlService = IDL.Service({
       ['query'],
     ),
   'getCurrentUser' : IDL.Func([], [CurrentUser], []),
+  'getDailyProgressNotesByPatientId' : IDL.Func(
+      [IDL.Nat],
+      [IDL.Vec(DailyProgressNote)],
+      ['query'],
+    ),
   'getDiagnosisTemplate' : IDL.Func(
       [IDL.Nat],
       [IDL.Opt(DiagnosisTemplate)],
@@ -630,7 +806,19 @@ export const idlService = IDL.Service({
       [IDL.Vec(Encounter)],
       ['query'],
     ),
+  'getFullSyncData' : IDL.Func(
+      [IDL.Text],
+      [IDL.Variant({ 'ok' : SyncData, 'err' : IDL.Text })],
+      ['query'],
+    ),
+  'getHandover' : IDL.Func([IDL.Nat], [IDL.Opt(HandoverEntry)], ['query']),
+  'getHandoversByPatientId' : IDL.Func(
+      [IDL.Nat],
+      [IDL.Vec(HandoverEntry)],
+      ['query'],
+    ),
   'getLastSyncTime' : IDL.Func([IDL.Text], [IDL.Opt(IDL.Int)], ['query']),
+  'getLastSyncTimestamp' : IDL.Func([], [IDL.Int], ['query']),
   'getObservationsByPatient' : IDL.Func(
       [IDL.Nat],
       [IDL.Vec(Observation)],
@@ -670,6 +858,11 @@ export const idlService = IDL.Service({
       ['query'],
     ),
   'getUnacknowledgedAlerts' : IDL.Func([], [IDL.Vec(ClinicalAlert)], ['query']),
+  'getUpdatedData' : IDL.Func(
+      [IDL.Text, IDL.Int],
+      [IDL.Variant({ 'ok' : UpdatedData, 'err' : IDL.Text })],
+      ['query'],
+    ),
   'getUserProfile' : IDL.Func(
       [IDL.Principal],
       [IDL.Opt(UserProfile)],
@@ -694,6 +887,11 @@ export const idlService = IDL.Service({
       [],
     ),
   'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+  'syncData' : IDL.Func(
+      [IDL.Text],
+      [IDL.Variant({ 'ok' : SyncData, 'err' : IDL.Text })],
+      ['query'],
+    ),
   'transferBed' : IDL.Func(
       [IDL.Nat, IDL.Nat, IDL.Text],
       [IDL.Variant({ 'ok' : BedRecord, 'err' : IDL.Text })],
@@ -723,6 +921,25 @@ export const idlService = IDL.Service({
       [IDL.Variant({ 'ok' : ClinicalNote, 'err' : IDL.Text })],
       [],
     ),
+  'updateDailyProgressNote' : IDL.Func(
+      [
+        IDL.Nat,
+        IDL.Vec(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Text,
+        IDL.Text,
+        IDL.Vec(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Bool,
+        IDL.Opt(IDL.Text),
+      ],
+      [IDL.Variant({ 'ok' : DailyProgressNote, 'err' : IDL.Text })],
+      [],
+    ),
   'updateDiagnosisTemplate' : IDL.Func(
       [
         IDL.Nat,
@@ -740,6 +957,25 @@ export const idlService = IDL.Service({
   'updateEncounter' : IDL.Func(
       [IDL.Nat, IDL.Nat, EncounterStatus, IDL.Opt(IDL.Int), IDL.Opt(IDL.Text)],
       [IDL.Variant({ 'ok' : Encounter, 'err' : IDL.Text })],
+      [],
+    ),
+  'updateHandover' : IDL.Func(
+      [
+        IDL.Nat,
+        IDL.Text,
+        IDL.Opt(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Vec(IDL.Text),
+        IDL.Opt(IDL.Text),
+        IDL.Opt(StaffRole),
+        IDL.Opt(IDL.Principal),
+        IDL.Opt(IDL.Text),
+        HandoverStatus,
+      ],
+      [IDL.Variant({ 'ok' : HandoverEntry, 'err' : IDL.Text })],
       [],
     ),
   'updateOrderStatus' : IDL.Func(
@@ -804,6 +1040,9 @@ export const idlService = IDL.Service({
       [Visit],
       [],
     ),
+  'upsertPatient' : IDL.Func([Patient], [Patient], []),
+  'upsertPrescription' : IDL.Func([Prescription], [Prescription], []),
+  'upsertVisit' : IDL.Func([Visit], [Visit], []),
 });
 
 export const idlInitArgs = [];
@@ -935,6 +1174,7 @@ export const idlFactory = ({ IDL }) => {
     'createdAt' : Time,
     'fullName' : IDL.Text,
     'email' : IDL.Opt(IDL.Text),
+    'updatedAt' : Time,
     'pastSurgicalHistory' : IDL.Opt(IDL.Text),
     'bloodGroup' : IDL.Opt(IDL.Text),
     'address' : IDL.Opt(IDL.Text),
@@ -972,6 +1212,24 @@ export const idlFactory = ({ IDL }) => {
     'doctorEmail' : IDL.Text,
     'timeSlot' : IDL.Opt(IDL.Text),
   });
+  const Medication = IDL.Record({
+    'duration' : IDL.Text,
+    'dose' : IDL.Text,
+    'name' : IDL.Text,
+    'instructions' : IDL.Text,
+    'frequency' : IDL.Text,
+  });
+  const Prescription = IDL.Record({
+    'id' : IDL.Nat,
+    'patientId' : IDL.Nat,
+    'createdAt' : Time,
+    'diagnosis' : IDL.Opt(IDL.Text),
+    'prescriptionDate' : Time,
+    'updatedAt' : Time,
+    'medications' : IDL.Vec(Medication),
+    'notes' : IDL.Opt(IDL.Text),
+    'visitId' : IDL.Opt(IDL.Nat),
+  });
   const QueueStatus = IDL.Variant({
     'serving' : IDL.Null,
     'skipped' : IDL.Null,
@@ -985,10 +1243,36 @@ export const idlFactory = ({ IDL }) => {
     'createdAt' : IDL.Int,
     'registerNumber' : IDL.Opt(IDL.Text),
     'calledAt' : IDL.Opt(IDL.Int),
+    'updatedAt' : IDL.Int,
     'serialNumber' : IDL.Nat,
     'patientName' : IDL.Text,
     'phone' : IDL.Opt(IDL.Text),
     'doctorEmail' : IDL.Text,
+  });
+  const VitalSigns = IDL.Record({
+    'respiratoryRate' : IDL.Opt(IDL.Text),
+    'temperature' : IDL.Opt(IDL.Text),
+    'bloodPressure' : IDL.Opt(IDL.Text),
+    'oxygenSaturation' : IDL.Opt(IDL.Text),
+    'pulse' : IDL.Opt(IDL.Text),
+  });
+  const VisitType = IDL.Variant({
+    'admitted' : IDL.Null,
+    'outdoor' : IDL.Null,
+  });
+  const Visit = IDL.Record({
+    'id' : IDL.Nat,
+    'vitalSigns' : VitalSigns,
+    'patientId' : IDL.Nat,
+    'createdAt' : Time,
+    'visitDate' : Time,
+    'visitType' : VisitType,
+    'diagnosis' : IDL.Opt(IDL.Text),
+    'updatedAt' : Time,
+    'historyOfPresentIllness' : IDL.Opt(IDL.Text),
+    'notes' : IDL.Opt(IDL.Text),
+    'physicalExamination' : IDL.Opt(IDL.Text),
+    'chiefComplaint' : IDL.Text,
   });
   const NoteType = IDL.Variant({
     'SOAP' : IDL.Null,
@@ -1013,6 +1297,37 @@ export const idlFactory = ({ IDL }) => {
     'versionInfo' : VersionedRecord,
     'encounterId' : IDL.Opt(IDL.Nat),
     'noteSubtype' : IDL.Opt(IDL.Text),
+  });
+  const DailyProgressType = IDL.Variant({
+    'morning' : IDL.Null,
+    'evening' : IDL.Null,
+    'emergency' : IDL.Null,
+  });
+  const DailyProgressNote = IDL.Record({
+    'id' : IDL.Nat,
+    'isDeleted' : IDL.Bool,
+    'drainMonitoring' : IDL.Opt(IDL.Text),
+    'patientId' : IDL.Nat,
+    'authorId' : IDL.Principal,
+    'createdAt' : IDL.Int,
+    'authorName' : IDL.Text,
+    'authorRole' : StaffRole,
+    'noteDate' : IDL.Text,
+    'objectiveVitals' : IDL.Opt(IDL.Text),
+    'assessmentText' : IDL.Text,
+    'subjectiveComplaints' : IDL.Vec(IDL.Text),
+    'isDraft' : IDL.Bool,
+    'updatedAt' : IDL.Int,
+    'activeDiagnoses' : IDL.Vec(IDL.Text),
+    'progressType' : DailyProgressType,
+    'activeComplaints' : IDL.Vec(IDL.Text),
+    'previousVersionIds' : IDL.Vec(IDL.Nat),
+    'versionInfo' : VersionedRecord,
+    'encounterId' : IDL.Opt(IDL.Nat),
+    'planText' : IDL.Text,
+    'systemReview' : IDL.Opt(IDL.Text),
+    'intakeOutput' : IDL.Opt(IDL.Text),
+    'investigations' : IDL.Vec(IDL.Text),
   });
   const DiagnosisTemplate = IDL.Record({
     'id' : IDL.Nat,
@@ -1053,6 +1368,49 @@ export const idlFactory = ({ IDL }) => {
     'locationNotes' : IDL.Opt(IDL.Text),
     'startDate' : IDL.Int,
   });
+  const HandoverShift = IDL.Variant({
+    'morning' : IDL.Null,
+    'evening' : IDL.Null,
+    'night' : IDL.Null,
+  });
+  const HandoverStatus = IDL.Variant({
+    'submitted' : IDL.Null,
+    'draft' : IDL.Null,
+  });
+  const HandoverEntry = IDL.Record({
+    'id' : IDL.Nat,
+    'status' : HandoverStatus,
+    'takenByName' : IDL.Opt(IDL.Text),
+    'takenByRole' : IDL.Opt(StaffRole),
+    'clinicalSummary' : IDL.Text,
+    'currentConsultant' : IDL.Opt(IDL.Text),
+    'consultantComment' : IDL.Opt(IDL.Text),
+    'patientId' : IDL.Nat,
+    'dayOfStay' : IDL.Opt(IDL.Nat),
+    'createdAt' : IDL.Int,
+    'ward' : IDL.Opt(IDL.Text),
+    'pendingInvestigations' : IDL.Vec(IDL.Text),
+    'vitalsSummary' : IDL.Opt(IDL.Text),
+    'bedNumber' : IDL.Opt(IDL.Text),
+    'registerNumber' : IDL.Opt(IDL.Text),
+    'diagnosis' : IDL.Opt(IDL.Text),
+    'missedMedications' : IDL.Vec(IDL.Text),
+    'shift' : HandoverShift,
+    'updatedAt' : IDL.Int,
+    'givenByPrincipal' : IDL.Principal,
+    'givenByName' : IDL.Text,
+    'consultantCommentAt' : IDL.Opt(IDL.Int),
+    'consultantCommentBy' : IDL.Opt(IDL.Principal),
+    'givenByRole' : StaffRole,
+    'takenByPrincipal' : IDL.Opt(IDL.Principal),
+    'patientName' : IDL.Text,
+    'shiftEndTime' : IDL.Int,
+    'pendingProcedures' : IDL.Vec(IDL.Text),
+    'tasksPending' : IDL.Vec(IDL.Text),
+    'versionInfo' : VersionedRecord,
+    'shiftStartTime' : IDL.Int,
+    'actionableItems' : IDL.Vec(IDL.Text),
+  });
   const OrderType = IDL.Variant({
     'Medication' : IDL.Null,
     'Procedure' : IDL.Null,
@@ -1083,47 +1441,6 @@ export const idlFactory = ({ IDL }) => {
     'versionInfo' : VersionedRecord,
     'encounterId' : IDL.Opt(IDL.Nat),
   });
-  const Medication = IDL.Record({
-    'duration' : IDL.Text,
-    'dose' : IDL.Text,
-    'name' : IDL.Text,
-    'instructions' : IDL.Text,
-    'frequency' : IDL.Text,
-  });
-  const Prescription = IDL.Record({
-    'id' : IDL.Nat,
-    'patientId' : IDL.Nat,
-    'createdAt' : Time,
-    'diagnosis' : IDL.Opt(IDL.Text),
-    'prescriptionDate' : Time,
-    'medications' : IDL.Vec(Medication),
-    'notes' : IDL.Opt(IDL.Text),
-    'visitId' : IDL.Opt(IDL.Nat),
-  });
-  const VitalSigns = IDL.Record({
-    'respiratoryRate' : IDL.Opt(IDL.Text),
-    'temperature' : IDL.Opt(IDL.Text),
-    'bloodPressure' : IDL.Opt(IDL.Text),
-    'oxygenSaturation' : IDL.Opt(IDL.Text),
-    'pulse' : IDL.Opt(IDL.Text),
-  });
-  const VisitType = IDL.Variant({
-    'admitted' : IDL.Null,
-    'outdoor' : IDL.Null,
-  });
-  const Visit = IDL.Record({
-    'id' : IDL.Nat,
-    'vitalSigns' : VitalSigns,
-    'patientId' : IDL.Nat,
-    'createdAt' : Time,
-    'visitDate' : Time,
-    'visitType' : VisitType,
-    'diagnosis' : IDL.Opt(IDL.Text),
-    'historyOfPresentIllness' : IDL.Opt(IDL.Text),
-    'notes' : IDL.Opt(IDL.Text),
-    'physicalExamination' : IDL.Opt(IDL.Text),
-    'chiefComplaint' : IDL.Text,
-  });
   const AuditEntry = IDL.Record({
     'id' : IDL.Nat,
     'changedByName' : IDL.Text,
@@ -1142,6 +1459,17 @@ export const idlFactory = ({ IDL }) => {
   const CurrentUser = IDL.Record({
     'principal' : IDL.Principal,
     'role' : UserRole,
+  });
+  const SyncData = IDL.Record({
+    'queueEntries' : IDL.Vec(SerialQueueEntry),
+    'appointments' : IDL.Vec(Appointment),
+    'timestamp' : IDL.Int,
+  });
+  const UpdatedData = IDL.Record({
+    'queueEntries' : IDL.Vec(SerialQueueEntry),
+    'appointments' : IDL.Vec(Appointment),
+    'timestamp' : IDL.Int,
+    'patients' : IDL.Vec(IDL.Nat),
   });
   const SyncRecord = IDL.Record({
     'id' : IDL.Nat,
@@ -1165,6 +1493,18 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : Observation, 'err' : IDL.Text })],
         [],
       ),
+    'addAuditEntry' : IDL.Func(
+        [
+          IDL.Text,
+          IDL.Nat,
+          IDL.Text,
+          IDL.Opt(IDL.Text),
+          IDL.Text,
+          IDL.Opt(IDL.Text),
+        ],
+        [],
+        [],
+      ),
     'assignBed' : IDL.Func(
         [IDL.Nat, IDL.Nat, IDL.Text],
         [IDL.Variant({ 'ok' : BedRecord, 'err' : IDL.Text })],
@@ -1177,11 +1517,18 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
         [],
       ),
+    'bulkUpsertPatients' : IDL.Func([IDL.Vec(Patient)], [IDL.Vec(Patient)], []),
+    'bulkUpsertPrescriptions' : IDL.Func(
+        [IDL.Vec(Prescription)],
+        [IDL.Vec(Prescription)],
+        [],
+      ),
     'bulkUpsertQueueEntries' : IDL.Func(
         [IDL.Vec(SerialQueueEntry)],
         [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
         [],
       ),
+    'bulkUpsertVisits' : IDL.Func([IDL.Vec(Visit)], [IDL.Vec(Visit)], []),
     'clearQueueByDate' : IDL.Func(
         [IDL.Text, IDL.Text],
         [IDL.Variant({ 'ok' : IDL.Nat, 'err' : IDL.Text })],
@@ -1229,6 +1576,27 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : ClinicalNote, 'err' : IDL.Text })],
         [],
       ),
+    'createDailyProgressNote' : IDL.Func(
+        [
+          IDL.Nat,
+          IDL.Opt(IDL.Nat),
+          DailyProgressType,
+          IDL.Text,
+          IDL.Vec(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Text,
+          IDL.Text,
+          IDL.Vec(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Bool,
+        ],
+        [IDL.Variant({ 'ok' : DailyProgressNote, 'err' : IDL.Text })],
+        [],
+      ),
     'createDiagnosisTemplate' : IDL.Func(
         [
           IDL.Text,
@@ -1245,6 +1613,30 @@ export const idlFactory = ({ IDL }) => {
     'createEncounter' : IDL.Func(
         [IDL.Nat, EncounterType, IDL.Opt(IDL.Text)],
         [IDL.Variant({ 'ok' : Encounter, 'err' : IDL.Text })],
+        [],
+      ),
+    'createHandover' : IDL.Func(
+        [
+          IDL.Nat,
+          HandoverShift,
+          IDL.Int,
+          IDL.Int,
+          IDL.Text,
+          IDL.Opt(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Opt(IDL.Nat),
+          IDL.Opt(IDL.Text),
+          IDL.Text,
+          IDL.Opt(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Vec(IDL.Text),
+        ],
+        [IDL.Variant({ 'ok' : HandoverEntry, 'err' : IDL.Text })],
         [],
       ),
     'createObservation' : IDL.Func(
@@ -1357,6 +1749,16 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : BedRecord, 'err' : IDL.Text })],
         [],
       ),
+    'dismissAlert' : IDL.Func(
+        [IDL.Nat],
+        [IDL.Variant({ 'ok' : ClinicalAlert, 'err' : IDL.Text })],
+        [],
+      ),
+    'getActiveAlerts' : IDL.Func(
+        [IDL.Nat],
+        [IDL.Vec(ClinicalAlert)],
+        ['query'],
+      ),
     'getActiveOrdersByPatient' : IDL.Func(
         [IDL.Nat],
         [IDL.Vec(ClinicalOrder)],
@@ -1385,8 +1787,15 @@ export const idlFactory = ({ IDL }) => {
       ),
     'getAllEncounters' : IDL.Func([], [IDL.Vec(Encounter)], ['query']),
     'getAllPatients' : IDL.Func([], [IDL.Vec(Patient)], ['query']),
+    'getAllPatientsSince' : IDL.Func([IDL.Int], [IDL.Vec(Patient)], ['query']),
     'getAllPrescriptions' : IDL.Func([], [IDL.Vec(Prescription)], ['query']),
+    'getAllPrescriptionsSince' : IDL.Func(
+        [IDL.Int],
+        [IDL.Vec(Prescription)],
+        ['query'],
+      ),
     'getAllVisits' : IDL.Func([], [IDL.Vec(Visit)], ['query']),
+    'getAllVisitsSince' : IDL.Func([IDL.Int], [IDL.Vec(Visit)], ['query']),
     'getAppointmentById' : IDL.Func(
         [IDL.Text],
         [IDL.Variant({ 'ok' : IDL.Opt(Appointment), 'err' : IDL.Text })],
@@ -1400,6 +1809,11 @@ export const idlFactory = ({ IDL }) => {
     'getAppointmentsSince' : IDL.Func(
         [IDL.Text, IDL.Int],
         [IDL.Variant({ 'ok' : IDL.Vec(Appointment), 'err' : IDL.Text })],
+        ['query'],
+      ),
+    'getAuditLog' : IDL.Func(
+        [IDL.Nat, IDL.Nat, IDL.Nat],
+        [IDL.Vec(AuditEntry)],
         ['query'],
       ),
     'getAuditTrail' : IDL.Func(
@@ -1421,6 +1835,11 @@ export const idlFactory = ({ IDL }) => {
         ['query'],
       ),
     'getCurrentUser' : IDL.Func([], [CurrentUser], []),
+    'getDailyProgressNotesByPatientId' : IDL.Func(
+        [IDL.Nat],
+        [IDL.Vec(DailyProgressNote)],
+        ['query'],
+      ),
     'getDiagnosisTemplate' : IDL.Func(
         [IDL.Nat],
         [IDL.Opt(DiagnosisTemplate)],
@@ -1431,7 +1850,19 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(Encounter)],
         ['query'],
       ),
+    'getFullSyncData' : IDL.Func(
+        [IDL.Text],
+        [IDL.Variant({ 'ok' : SyncData, 'err' : IDL.Text })],
+        ['query'],
+      ),
+    'getHandover' : IDL.Func([IDL.Nat], [IDL.Opt(HandoverEntry)], ['query']),
+    'getHandoversByPatientId' : IDL.Func(
+        [IDL.Nat],
+        [IDL.Vec(HandoverEntry)],
+        ['query'],
+      ),
     'getLastSyncTime' : IDL.Func([IDL.Text], [IDL.Opt(IDL.Int)], ['query']),
+    'getLastSyncTimestamp' : IDL.Func([], [IDL.Int], ['query']),
     'getObservationsByPatient' : IDL.Func(
         [IDL.Nat],
         [IDL.Vec(Observation)],
@@ -1475,6 +1906,11 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Vec(ClinicalAlert)],
         ['query'],
       ),
+    'getUpdatedData' : IDL.Func(
+        [IDL.Text, IDL.Int],
+        [IDL.Variant({ 'ok' : UpdatedData, 'err' : IDL.Text })],
+        ['query'],
+      ),
     'getUserProfile' : IDL.Func(
         [IDL.Principal],
         [IDL.Opt(UserProfile)],
@@ -1499,6 +1935,11 @@ export const idlFactory = ({ IDL }) => {
         [],
       ),
     'saveCallerUserProfile' : IDL.Func([UserProfile], [], []),
+    'syncData' : IDL.Func(
+        [IDL.Text],
+        [IDL.Variant({ 'ok' : SyncData, 'err' : IDL.Text })],
+        ['query'],
+      ),
     'transferBed' : IDL.Func(
         [IDL.Nat, IDL.Nat, IDL.Text],
         [IDL.Variant({ 'ok' : BedRecord, 'err' : IDL.Text })],
@@ -1528,6 +1969,25 @@ export const idlFactory = ({ IDL }) => {
         [IDL.Variant({ 'ok' : ClinicalNote, 'err' : IDL.Text })],
         [],
       ),
+    'updateDailyProgressNote' : IDL.Func(
+        [
+          IDL.Nat,
+          IDL.Vec(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Text,
+          IDL.Text,
+          IDL.Vec(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Bool,
+          IDL.Opt(IDL.Text),
+        ],
+        [IDL.Variant({ 'ok' : DailyProgressNote, 'err' : IDL.Text })],
+        [],
+      ),
     'updateDiagnosisTemplate' : IDL.Func(
         [
           IDL.Nat,
@@ -1551,6 +2011,25 @@ export const idlFactory = ({ IDL }) => {
           IDL.Opt(IDL.Text),
         ],
         [IDL.Variant({ 'ok' : Encounter, 'err' : IDL.Text })],
+        [],
+      ),
+    'updateHandover' : IDL.Func(
+        [
+          IDL.Nat,
+          IDL.Text,
+          IDL.Opt(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Vec(IDL.Text),
+          IDL.Opt(IDL.Text),
+          IDL.Opt(StaffRole),
+          IDL.Opt(IDL.Principal),
+          IDL.Opt(IDL.Text),
+          HandoverStatus,
+        ],
+        [IDL.Variant({ 'ok' : HandoverEntry, 'err' : IDL.Text })],
         [],
       ),
     'updateOrderStatus' : IDL.Func(
@@ -1615,6 +2094,9 @@ export const idlFactory = ({ IDL }) => {
         [Visit],
         [],
       ),
+    'upsertPatient' : IDL.Func([Patient], [Patient], []),
+    'upsertPrescription' : IDL.Func([Prescription], [Prescription], []),
+    'upsertVisit' : IDL.Func([Visit], [Visit], []),
   });
 };
 

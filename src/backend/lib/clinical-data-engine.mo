@@ -4,7 +4,6 @@ import Time "mo:core/Time";
 import Principal "mo:core/Principal";
 import Nat "mo:core/Nat";
 import Int "mo:core/Int";
-import Float "mo:core/Float";
 
 import Types "../types/clinical-data-engine";
 
@@ -24,6 +23,8 @@ module {
     syncRecords : Map.Map<Text, Types.SyncRecord>;
     appointments : Map.Map<Text, Types.Appointment>;
     queueEntries : Map.Map<Text, Types.SerialQueueEntry>;
+    handovers : Map.Map<Nat, Types.HandoverEntry>;
+    dailyProgressNotes : Map.Map<Nat, Types.DailyProgressNote>;
     var encounterIdCounter : Nat;
     var observationIdCounter : Nat;
     var orderIdCounter : Nat;
@@ -33,6 +34,8 @@ module {
     var bedIdCounter : Nat;
     var diagnosisTemplateIdCounter : Nat;
     var syncRecordIdCounter : Nat;
+    var handoverIdCounter : Nat;
+    var dailyProgressNoteIdCounter : Nat;
   };
 
   public func initState() : EngineState {
@@ -48,6 +51,8 @@ module {
       syncRecords = Map.empty<Text, Types.SyncRecord>();
       appointments = Map.empty<Text, Types.Appointment>();
       queueEntries = Map.empty<Text, Types.SerialQueueEntry>();
+      handovers = Map.empty<Nat, Types.HandoverEntry>();
+      dailyProgressNotes = Map.empty<Nat, Types.DailyProgressNote>();
       var encounterIdCounter = 1;
       var observationIdCounter = 1;
       var orderIdCounter = 1;
@@ -57,6 +62,8 @@ module {
       var bedIdCounter = 1;
       var diagnosisTemplateIdCounter = 1;
       var syncRecordIdCounter = 1;
+      var handoverIdCounter = 1;
+      var dailyProgressNoteIdCounter = 1;
     };
   };
 
@@ -1249,8 +1256,19 @@ module {
       if (callerRole != #admin and callerEmail != a.doctorEmail) {
         return #err("Unauthorized: can only upsert your own appointments");
       };
-      state.appointments.add(a.id, a);
-      count += 1;
+      // Idempotent: only overwrite if incoming updatedAt is newer
+      switch (state.appointments.get(a.id)) {
+        case (?existing) {
+          if (a.updatedAt > existing.updatedAt) {
+            state.appointments.add(a.id, a);
+            count += 1;
+          };
+        };
+        case (null) {
+          state.appointments.add(a.id, a);
+          count += 1;
+        };
+      };
     };
     #ok(count);
   };
@@ -1274,6 +1292,7 @@ module {
     if (callerRole != #admin and callerEmail != doctorEmail) {
       return #err("Unauthorized: can only create queue entries for your own account");
     };
+    let now = Time.now();
     let entry : Types.SerialQueueEntry = {
       id;
       date;
@@ -1284,7 +1303,8 @@ module {
       status;
       calledAt;
       doctorEmail;
-      createdAt = Time.now();
+      createdAt = now;
+      updatedAt = now;
     };
     state.queueEntries.add(id, entry);
     #ok(entry);
@@ -1309,6 +1329,7 @@ module {
       existing with
       status;
       calledAt;
+      updatedAt = Time.now();
     };
     state.queueEntries.add(id, updated);
     #ok(updated);
@@ -1378,7 +1399,7 @@ module {
       return #err("Unauthorized: can only sync your own queue entries");
     };
     let results = state.queueEntries.values().filter(func (e) {
-      e.doctorEmail == doctorEmail and e.createdAt >= sinceTimestamp
+      e.doctorEmail == doctorEmail and e.updatedAt >= sinceTimestamp
     }).toArray();
     #ok(results);
   };
@@ -1394,10 +1415,323 @@ module {
       if (callerRole != #admin and callerEmail != e.doctorEmail) {
         return #err("Unauthorized: can only upsert your own queue entries");
       };
-      state.queueEntries.add(e.id, e);
-      count += 1;
+      // Idempotent: only overwrite if incoming updatedAt is newer
+      switch (state.queueEntries.get(e.id)) {
+        case (?existing) {
+          if (e.updatedAt > existing.updatedAt) {
+            state.queueEntries.add(e.id, e);
+            count += 1;
+          };
+        };
+        case (null) {
+          state.queueEntries.add(e.id, e);
+          count += 1;
+        };
+      };
     };
     #ok(count);
+  };
+
+  // ─── Full Sync Data ────────────────────────────────────────────────────────
+  // Returns all appointments and queue entries in one call for device bootstrap.
+
+  public func getFullSyncData(
+    state : EngineState,
+    callerRole : Types.StaffRole,
+    callerEmail : Text,
+    doctorEmail : Text,
+  ) : { #ok : Types.SyncData; #err : Text } {
+    if (callerRole != #admin and callerEmail != doctorEmail) {
+      return #err("Unauthorized: can only sync your own data");
+    };
+    let appointments = state.appointments.values().filter(func (a) {
+      a.doctorEmail == doctorEmail
+    }).toArray();
+    let queueEntries = state.queueEntries.values().filter(func (e) {
+      e.doctorEmail == doctorEmail
+    }).toArray();
+    #ok({
+      appointments;
+      queueEntries;
+      timestamp = Time.now();
+    });
+  };
+
+  // ─── Canister Timestamp ────────────────────────────────────────────────────
+
+  public func getLastSyncTimestamp() : Int {
+    Time.now();
+  };
+
+  // ─── Handover Logic ────────────────────────────────────────────────────────
+
+  public func createHandover(
+    state : EngineState,
+    caller : Principal,
+    callerName : Text,
+    callerRole : Types.StaffRole,
+    patientId : Nat,
+    shift : Types.HandoverShift,
+    shiftStartTime : Int,
+    shiftEndTime : Int,
+    patientName : Text,
+    registerNumber : ?Text,
+    ward : ?Text,
+    bedNumber : ?Text,
+    diagnosis : ?Text,
+    dayOfStay : ?Nat,
+    currentConsultant : ?Text,
+    clinicalSummary : Text,
+    vitalsSummary : ?Text,
+    actionableItems : [Text],
+    tasksPending : [Text],
+    pendingInvestigations : [Text],
+    pendingProcedures : [Text],
+    missedMedications : [Text],
+  ) : Types.HandoverEntry {
+    let id = state.handoverIdCounter;
+    state.handoverIdCounter += 1;
+    let versionInfo = makeVersionedRecord(1, caller, callerName, callerRole, null);
+    let now = Time.now();
+    let entry : Types.HandoverEntry = {
+      id;
+      patientId;
+      shift;
+      shiftStartTime;
+      shiftEndTime;
+      status = #draft;
+      patientName;
+      registerNumber;
+      ward;
+      bedNumber;
+      diagnosis;
+      dayOfStay;
+      currentConsultant;
+      clinicalSummary;
+      vitalsSummary;
+      actionableItems;
+      tasksPending;
+      pendingInvestigations;
+      pendingProcedures;
+      missedMedications;
+      givenByName = callerName;
+      givenByRole = callerRole;
+      givenByPrincipal = caller;
+      takenByName = null;
+      takenByRole = null;
+      takenByPrincipal = null;
+      consultantComment = null;
+      consultantCommentAt = null;
+      consultantCommentBy = null;
+      createdAt = now;
+      updatedAt = now;
+      versionInfo;
+    };
+    state.handovers.add(id, entry);
+    addAudit(state, "Handover", id, "created", null, "Handover-" # id.toText(), caller, callerName, callerRole, null);
+    entry;
+  };
+
+  public func getHandover(
+    state : EngineState,
+    id : Nat,
+  ) : ?Types.HandoverEntry {
+    state.handovers.get(id);
+  };
+
+  public func getHandoversByPatientId(
+    state : EngineState,
+    patientId : Nat,
+  ) : [Types.HandoverEntry] {
+    state.handovers.values().filter(func (h) { h.patientId == patientId }).toArray();
+  };
+
+  public func updateHandover(
+    state : EngineState,
+    caller : Principal,
+    callerName : Text,
+    callerRole : Types.StaffRole,
+    id : Nat,
+    clinicalSummary : Text,
+    vitalsSummary : ?Text,
+    actionableItems : [Text],
+    tasksPending : [Text],
+    pendingInvestigations : [Text],
+    pendingProcedures : [Text],
+    missedMedications : [Text],
+    takenByName : ?Text,
+    takenByRole : ?Types.StaffRole,
+    takenByPrincipal : ?Principal,
+    consultantComment : ?Text,
+    status : Types.HandoverStatus,
+  ) : Types.HandoverEntry {
+    let existing = switch (state.handovers.get(id)) {
+      case (null) { Runtime.trap("Handover not found") };
+      case (?h) { h };
+    };
+    // Only the creator or admin can edit a draft; submitted handovers can only be commented on by consultant
+    if (existing.status == #submitted and callerRole != #admin and callerRole != #consultant_doctor) {
+      Runtime.trap("Unauthorized: submitted handovers cannot be edited");
+    };
+    let newVersion = makeVersionedRecord(existing.versionInfo.version + 1, caller, callerName, callerRole, null);
+    let updated : Types.HandoverEntry = {
+      existing with
+      clinicalSummary;
+      vitalsSummary;
+      actionableItems;
+      tasksPending;
+      pendingInvestigations;
+      pendingProcedures;
+      missedMedications;
+      takenByName;
+      takenByRole;
+      takenByPrincipal;
+      consultantComment;
+      consultantCommentAt = switch (consultantComment) {
+        case (?_) { ?Time.now() };
+        case (null) { existing.consultantCommentAt };
+      };
+      consultantCommentBy = switch (consultantComment) {
+        case (?_) { ?caller };
+        case (null) { existing.consultantCommentBy };
+      };
+      status;
+      updatedAt = Time.now();
+      versionInfo = newVersion;
+    };
+    state.handovers.add(id, updated);
+    addAudit(state, "Handover", id, "updated", null, debug_show(status), caller, callerName, callerRole, null);
+    updated;
+  };
+
+  // ─── Daily Progress Note Logic ─────────────────────────────────────────────
+
+  public func createDailyProgressNote(
+    state : EngineState,
+    caller : Principal,
+    callerName : Text,
+    callerRole : Types.StaffRole,
+    patientId : Nat,
+    encounterId : ?Nat,
+    progressType : Types.DailyProgressType,
+    noteDate : Text,
+    subjectiveComplaints : [Text],
+    systemReview : ?Text,
+    objectiveVitals : ?Text,
+    intakeOutput : ?Text,
+    drainMonitoring : ?Text,
+    investigations : [Text],
+    assessmentText : Text,
+    planText : Text,
+    activeComplaints : [Text],
+    activeDiagnoses : [Text],
+    isDraft : Bool,
+  ) : Types.DailyProgressNote {
+    // Interns can only create draft notes
+    if (callerRole == #intern_doctor and not isDraft) {
+      Runtime.trap("Unauthorized: Intern doctors can only create draft progress notes");
+    };
+    let id = state.dailyProgressNoteIdCounter;
+    state.dailyProgressNoteIdCounter += 1;
+    let versionInfo = makeVersionedRecord(1, caller, callerName, callerRole, null);
+    let now = Time.now();
+    let note : Types.DailyProgressNote = {
+      id;
+      patientId;
+      encounterId;
+      progressType;
+      noteDate;
+      subjectiveComplaints;
+      systemReview;
+      objectiveVitals;
+      intakeOutput;
+      drainMonitoring;
+      investigations;
+      assessmentText;
+      planText;
+      activeComplaints;
+      activeDiagnoses;
+      authorId = caller;
+      authorName = callerName;
+      authorRole = callerRole;
+      isDraft;
+      createdAt = now;
+      updatedAt = now;
+      versionInfo;
+      previousVersionIds = [];
+      isDeleted = false;
+    };
+    state.dailyProgressNotes.add(id, note);
+    addAudit(state, "DailyProgressNote", id, "created", null, noteDate # "-" # debug_show(progressType), caller, callerName, callerRole, null);
+    note;
+  };
+
+  public func getDailyProgressNotesByPatientId(
+    state : EngineState,
+    patientId : Nat,
+  ) : [Types.DailyProgressNote] {
+    state.dailyProgressNotes.values().filter(func (n) {
+      n.patientId == patientId and not n.isDeleted
+    }).toArray();
+  };
+
+  public func updateDailyProgressNote(
+    state : EngineState,
+    caller : Principal,
+    callerName : Text,
+    callerRole : Types.StaffRole,
+    id : Nat,
+    subjectiveComplaints : [Text],
+    systemReview : ?Text,
+    objectiveVitals : ?Text,
+    intakeOutput : ?Text,
+    drainMonitoring : ?Text,
+    investigations : [Text],
+    assessmentText : Text,
+    planText : Text,
+    activeComplaints : [Text],
+    activeDiagnoses : [Text],
+    isDraft : Bool,
+    changeReason : ?Text,
+  ) : Types.DailyProgressNote {
+    let existing = switch (state.dailyProgressNotes.get(id)) {
+      case (null) { Runtime.trap("Daily progress note not found") };
+      case (?n) { n };
+    };
+    if (callerRole == #intern_doctor and not isDraft) {
+      Runtime.trap("Unauthorized: Intern doctors can only save draft progress notes");
+    };
+    // Archive existing version
+    let archiveId = state.dailyProgressNoteIdCounter;
+    state.dailyProgressNoteIdCounter += 1;
+    let archived : Types.DailyProgressNote = {
+      existing with
+      id = archiveId;
+      isDeleted = true;
+    };
+    state.dailyProgressNotes.add(archiveId, archived);
+    let prevIds = existing.previousVersionIds.concat([archiveId]);
+    let newVersion = makeVersionedRecord(existing.versionInfo.version + 1, caller, callerName, callerRole, changeReason);
+    let updated : Types.DailyProgressNote = {
+      existing with
+      subjectiveComplaints;
+      systemReview;
+      objectiveVitals;
+      intakeOutput;
+      drainMonitoring;
+      investigations;
+      assessmentText;
+      planText;
+      activeComplaints;
+      activeDiagnoses;
+      isDraft;
+      updatedAt = Time.now();
+      versionInfo = newVersion;
+      previousVersionIds = prevIds;
+    };
+    state.dailyProgressNotes.add(id, updated);
+    addAudit(state, "DailyProgressNote", id, "updated", null, assessmentText, caller, callerName, callerRole, changeReason);
+    updated;
   };
 
 };

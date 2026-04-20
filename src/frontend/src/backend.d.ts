@@ -7,8 +7,54 @@ export interface None {
     __kind__: "None";
 }
 export type Option<T> = Some<T> | None;
-export interface UserProfile {
+export interface Medication {
+    duration: string;
+    dose: string;
     name: string;
+    instructions: string;
+    frequency: string;
+}
+export interface DailyProgressNote {
+    id: bigint;
+    isDeleted: boolean;
+    drainMonitoring?: string;
+    patientId: bigint;
+    authorId: Principal;
+    createdAt: bigint;
+    authorName: string;
+    authorRole: StaffRole;
+    noteDate: string;
+    objectiveVitals?: string;
+    assessmentText: string;
+    subjectiveComplaints: Array<string>;
+    isDraft: boolean;
+    updatedAt: bigint;
+    activeDiagnoses: Array<string>;
+    progressType: DailyProgressType;
+    activeComplaints: Array<string>;
+    previousVersionIds: Array<bigint>;
+    versionInfo: VersionedRecord;
+    encounterId?: bigint;
+    planText: string;
+    systemReview?: string;
+    intakeOutput?: string;
+    investigations: Array<string>;
+}
+export type Time = bigint;
+export interface ClinicalAlert {
+    id: bigint;
+    alertType: AlertType;
+    acknowledgedAt?: bigint;
+    acknowledgedBy?: Principal;
+    patientId: bigint;
+    isAcknowledged: boolean;
+    isResolved: boolean;
+    triggeredAt: bigint;
+    triggeredBy: string;
+    message: string;
+    details?: string;
+    severity: AlertSeverity;
+    resolvedAt?: bigint;
 }
 export interface Appointment {
     id: string;
@@ -28,7 +74,6 @@ export interface Appointment {
     doctorEmail: string;
     timeSlot?: string;
 }
-export type Time = bigint;
 export interface AuditEntry {
     id: bigint;
     changedByName: string;
@@ -85,6 +130,7 @@ export interface Patient {
     createdAt: Time;
     fullName: string;
     email?: string;
+    updatedAt: Time;
     pastSurgicalHistory?: string;
     bloodGroup?: string;
     address?: string;
@@ -122,6 +168,40 @@ export interface VitalSigns {
     oxygenSaturation?: string;
     pulse?: string;
 }
+export interface HandoverEntry {
+    id: bigint;
+    status: HandoverStatus;
+    takenByName?: string;
+    takenByRole?: StaffRole;
+    clinicalSummary: string;
+    currentConsultant?: string;
+    consultantComment?: string;
+    patientId: bigint;
+    dayOfStay?: bigint;
+    createdAt: bigint;
+    ward?: string;
+    pendingInvestigations: Array<string>;
+    vitalsSummary?: string;
+    bedNumber?: string;
+    registerNumber?: string;
+    diagnosis?: string;
+    missedMedications: Array<string>;
+    shift: HandoverShift;
+    updatedAt: bigint;
+    givenByPrincipal: Principal;
+    givenByName: string;
+    consultantCommentAt?: bigint;
+    consultantCommentBy?: Principal;
+    givenByRole: StaffRole;
+    takenByPrincipal?: Principal;
+    patientName: string;
+    shiftEndTime: bigint;
+    pendingProcedures: Array<string>;
+    tasksPending: Array<string>;
+    versionInfo: VersionedRecord;
+    shiftStartTime: bigint;
+    actionableItems: Array<string>;
+}
 export interface Visit {
     id: bigint;
     vitalSigns: VitalSigns;
@@ -130,6 +210,7 @@ export interface Visit {
     visitDate: Time;
     visitType: VisitType;
     diagnosis?: string;
+    updatedAt: Time;
     historyOfPresentIllness?: string;
     notes?: string;
     physicalExamination?: string;
@@ -194,6 +275,11 @@ export interface BedRecord {
     patientName?: string;
     dischargeDate?: bigint;
 }
+export interface SyncData {
+    queueEntries: Array<SerialQueueEntry>;
+    appointments: Array<Appointment>;
+    timestamp: bigint;
+}
 export interface BedTransferEntry {
     toBed: string;
     date: bigint;
@@ -207,6 +293,7 @@ export interface SerialQueueEntry {
     createdAt: bigint;
     registerNumber?: string;
     calledAt?: bigint;
+    updatedAt: bigint;
     serialNumber: bigint;
     patientName: string;
     phone?: string;
@@ -218,31 +305,19 @@ export interface Prescription {
     createdAt: Time;
     diagnosis?: string;
     prescriptionDate: Time;
+    updatedAt: Time;
     medications: Array<Medication>;
     notes?: string;
     visitId?: bigint;
 }
-export interface ClinicalAlert {
-    id: bigint;
-    alertType: AlertType;
-    acknowledgedAt?: bigint;
-    acknowledgedBy?: Principal;
-    patientId: bigint;
-    isAcknowledged: boolean;
-    isResolved: boolean;
-    triggeredAt: bigint;
-    triggeredBy: string;
-    message: string;
-    details?: string;
-    severity: AlertSeverity;
-    resolvedAt?: bigint;
+export interface UpdatedData {
+    queueEntries: Array<SerialQueueEntry>;
+    appointments: Array<Appointment>;
+    timestamp: bigint;
+    patients: Array<bigint>;
 }
-export interface Medication {
-    duration: string;
-    dose: string;
+export interface UserProfile {
     name: string;
-    instructions: string;
-    frequency: string;
 }
 export enum AlertSeverity {
     Info = "Info",
@@ -273,6 +348,11 @@ export enum BedStatus {
     Maintenance = "Maintenance",
     Occupied = "Occupied"
 }
+export enum DailyProgressType {
+    morning = "morning",
+    evening = "evening",
+    emergency = "emergency"
+}
 export enum EncounterStatus {
     Planned = "Planned",
     Cancelled = "Cancelled",
@@ -289,6 +369,15 @@ export enum Gender {
     other = "other",
     female = "female",
     male = "male"
+}
+export enum HandoverShift {
+    morning = "morning",
+    evening = "evening",
+    night = "night"
+}
+export enum HandoverStatus {
+    submitted = "submitted",
+    draft = "draft"
 }
 export enum NoteType {
     SOAP = "SOAP",
@@ -363,6 +452,7 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
+    addAuditEntry(entityType: string, entityId: bigint, fieldName: string, beforeValue: string | null, afterValue: string, reason: string | null): Promise<void>;
     assignBed(bedId: bigint, patientId: bigint, patientName: string): Promise<{
         __kind__: "ok";
         ok: BedRecord;
@@ -379,6 +469,8 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
+    bulkUpsertPatients(pats: Array<Patient>): Promise<Array<Patient>>;
+    bulkUpsertPrescriptions(prescs: Array<Prescription>): Promise<Array<Prescription>>;
     bulkUpsertQueueEntries(entries: Array<SerialQueueEntry>): Promise<{
         __kind__: "ok";
         ok: bigint;
@@ -386,6 +478,7 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
+    bulkUpsertVisits(vs: Array<Visit>): Promise<Array<Visit>>;
     clearQueueByDate(date: string, doctorEmail: string): Promise<{
         __kind__: "ok";
         ok: bigint;
@@ -421,6 +514,13 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
+    createDailyProgressNote(patientId: bigint, encounterId: bigint | null, progressType: DailyProgressType, noteDate: string, subjectiveComplaints: Array<string>, systemReview: string | null, objectiveVitals: string | null, intakeOutput: string | null, drainMonitoring: string | null, investigations: Array<string>, assessmentText: string, planText: string, activeComplaints: Array<string>, activeDiagnoses: Array<string>, isDraft: boolean): Promise<{
+        __kind__: "ok";
+        ok: DailyProgressNote;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     createDiagnosisTemplate(diagnosisName: string, diagnosisNameBn: string | null, icdCode: string | null, defaultDrugs: Array<string>, defaultInvestigations: Array<string>, defaultAdvice: Array<string>, defaultAdviceBn: Array<string>): Promise<{
         __kind__: "ok";
         ok: DiagnosisTemplate;
@@ -431,6 +531,13 @@ export interface backendInterface {
     createEncounter(patientId: bigint, encounterType: EncounterType, locationNotes: string | null): Promise<{
         __kind__: "ok";
         ok: Encounter;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    createHandover(patientId: bigint, shift: HandoverShift, shiftStartTime: bigint, shiftEndTime: bigint, patientName: string, registerNumber: string | null, ward: string | null, bedNumber: string | null, diagnosis: string | null, dayOfStay: bigint | null, currentConsultant: string | null, clinicalSummary: string, vitalsSummary: string | null, actionableItems: Array<string>, tasksPending: Array<string>, pendingInvestigations: Array<string>, pendingProcedures: Array<string>, missedMedications: Array<string>): Promise<{
+        __kind__: "ok";
+        ok: HandoverEntry;
     } | {
         __kind__: "err";
         err: string;
@@ -483,6 +590,14 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
+    dismissAlert(id: bigint): Promise<{
+        __kind__: "ok";
+        ok: ClinicalAlert;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    getActiveAlerts(patientId: bigint): Promise<Array<ClinicalAlert>>;
     getActiveOrdersByPatient(patientId: bigint): Promise<Array<ClinicalOrder>>;
     getAlertsByPatient(patientId: bigint): Promise<Array<ClinicalAlert>>;
     getAllAppointmentsByDoctor(doctorEmail: string): Promise<{
@@ -497,8 +612,11 @@ export interface backendInterface {
     getAllDiagnosisTemplates(): Promise<Array<DiagnosisTemplate>>;
     getAllEncounters(): Promise<Array<Encounter>>;
     getAllPatients(): Promise<Array<Patient>>;
+    getAllPatientsSince(sinceTimestamp: bigint): Promise<Array<Patient>>;
     getAllPrescriptions(): Promise<Array<Prescription>>;
+    getAllPrescriptionsSince(sinceTimestamp: bigint): Promise<Array<Prescription>>;
     getAllVisits(): Promise<Array<Visit>>;
+    getAllVisitsSince(sinceTimestamp: bigint): Promise<Array<Visit>>;
     getAppointmentById(id: string): Promise<{
         __kind__: "ok";
         ok: Appointment | null;
@@ -520,6 +638,7 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
+    getAuditLog(patientId: bigint, limit: bigint, offset: bigint): Promise<Array<AuditEntry>>;
     getAuditTrail(patientId: bigint, limit: bigint, offset: bigint): Promise<Array<AuditEntry>>;
     getAvailableBeds(): Promise<Array<BedRecord>>;
     getCallerUserProfile(): Promise<UserProfile | null>;
@@ -527,9 +646,20 @@ export interface backendInterface {
     getClinicalNotesByPatient(patientId: bigint): Promise<Array<ClinicalNote>>;
     getClinicalNotesByType(patientId: bigint, noteType: NoteType): Promise<Array<ClinicalNote>>;
     getCurrentUser(): Promise<CurrentUser>;
+    getDailyProgressNotesByPatientId(patientId: bigint): Promise<Array<DailyProgressNote>>;
     getDiagnosisTemplate(id: bigint): Promise<DiagnosisTemplate | null>;
     getEncountersByPatient(patientId: bigint): Promise<Array<Encounter>>;
+    getFullSyncData(doctorEmail: string): Promise<{
+        __kind__: "ok";
+        ok: SyncData;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    getHandover(id: bigint): Promise<HandoverEntry | null>;
+    getHandoversByPatientId(patientId: bigint): Promise<Array<HandoverEntry>>;
     getLastSyncTime(deviceId: string): Promise<bigint | null>;
+    getLastSyncTimestamp(): Promise<bigint>;
     getObservationsByPatient(patientId: bigint): Promise<Array<Observation>>;
     getObservationsByType(patientId: bigint, observationType: ObservationType): Promise<Array<Observation>>;
     getOccupiedBeds(): Promise<Array<BedRecord>>;
@@ -553,6 +683,13 @@ export interface backendInterface {
         err: string;
     }>;
     getUnacknowledgedAlerts(): Promise<Array<ClinicalAlert>>;
+    getUpdatedData(doctorEmail: string, sinceTimestamp: bigint): Promise<{
+        __kind__: "ok";
+        ok: UpdatedData;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     getUserProfile(user: Principal): Promise<UserProfile | null>;
     getVisit(id: bigint): Promise<Visit | null>;
     getVisitsByPatientId(patientId: bigint): Promise<Array<Visit>>;
@@ -579,6 +716,13 @@ export interface backendInterface {
         err: string;
     }>;
     saveCallerUserProfile(profile: UserProfile): Promise<void>;
+    syncData(doctorEmail: string): Promise<{
+        __kind__: "ok";
+        ok: SyncData;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     transferBed(bedId: bigint, newBedId: bigint, reason: string): Promise<{
         __kind__: "ok";
         ok: BedRecord;
@@ -600,6 +744,13 @@ export interface backendInterface {
         __kind__: "err";
         err: string;
     }>;
+    updateDailyProgressNote(id: bigint, subjectiveComplaints: Array<string>, systemReview: string | null, objectiveVitals: string | null, intakeOutput: string | null, drainMonitoring: string | null, investigations: Array<string>, assessmentText: string, planText: string, activeComplaints: Array<string>, activeDiagnoses: Array<string>, isDraft: boolean, changeReason: string | null): Promise<{
+        __kind__: "ok";
+        ok: DailyProgressNote;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
     updateDiagnosisTemplate(id: bigint, diagnosisName: string, diagnosisNameBn: string | null, icdCode: string | null, defaultDrugs: Array<string>, defaultInvestigations: Array<string>, defaultAdvice: Array<string>, defaultAdviceBn: Array<string>): Promise<{
         __kind__: "ok";
         ok: DiagnosisTemplate;
@@ -610,6 +761,13 @@ export interface backendInterface {
     updateEncounter(id: bigint, patientId: bigint, status: EncounterStatus, endDate: bigint | null, locationNotes: string | null): Promise<{
         __kind__: "ok";
         ok: Encounter;
+    } | {
+        __kind__: "err";
+        err: string;
+    }>;
+    updateHandover(id: bigint, clinicalSummary: string, vitalsSummary: string | null, actionableItems: Array<string>, tasksPending: Array<string>, pendingInvestigations: Array<string>, pendingProcedures: Array<string>, missedMedications: Array<string>, takenByName: string | null, takenByRole: StaffRole | null, takenByPrincipal: Principal | null, consultantComment: string | null, status: HandoverStatus): Promise<{
+        __kind__: "ok";
+        ok: HandoverEntry;
     } | {
         __kind__: "err";
         err: string;
@@ -631,4 +789,7 @@ export interface backendInterface {
         err: string;
     }>;
     updateVisit(id: bigint, patientId: bigint, visitDate: Time, chiefComplaint: string, historyOfPresentIllness: string | null, vitalSigns: VitalSigns, physicalExamination: string | null, diagnosis: string | null, notes: string | null, visitType: VisitType): Promise<Visit>;
+    upsertPatient(patient: Patient): Promise<Patient>;
+    upsertPrescription(prescription: Prescription): Promise<Prescription>;
+    upsertVisit(visit: Visit): Promise<Visit>;
 }

@@ -273,6 +273,104 @@ module {
     calledAt : ?Int;
     doctorEmail : Text;
     createdAt : Int;
+    updatedAt : Int;       // stamped on every create/update for sync
+  };
+
+  // ─── Handover ──────────────────────────────────────────────────────────────
+
+  public type HandoverShift = { #morning; #evening; #night };
+
+  public type HandoverStatus = { #draft; #submitted };
+
+  public type HandoverEntry = {
+    id : Nat;
+    patientId : Nat;
+    shift : HandoverShift;
+    shiftStartTime : Int;
+    shiftEndTime : Int;
+    status : HandoverStatus;
+    // Patient info
+    patientName : Text;
+    registerNumber : ?Text;
+    ward : ?Text;
+    bedNumber : ?Text;
+    diagnosis : ?Text;
+    dayOfStay : ?Nat;
+    currentConsultant : ?Text;
+    // Clinical content
+    clinicalSummary : Text;
+    vitalsSummary : ?Text;
+    actionableItems : [Text];
+    tasksPending : [Text];
+    pendingInvestigations : [Text];
+    pendingProcedures : [Text];
+    missedMedications : [Text];
+    // Handover chain
+    givenByName : Text;
+    givenByRole : StaffRole;
+    givenByPrincipal : Principal;
+    takenByName : ?Text;
+    takenByRole : ?StaffRole;
+    takenByPrincipal : ?Principal;
+    consultantComment : ?Text;
+    consultantCommentAt : ?Int;
+    consultantCommentBy : ?Principal;
+    // Metadata
+    createdAt : Int;
+    updatedAt : Int;
+    versionInfo : VersionedRecord;
+  };
+
+  // ─── Daily Progress Note ───────────────────────────────────────────────────
+
+  public type DailyProgressType = { #morning; #evening; #emergency };
+
+  public type DailyProgressNote = {
+    id : Nat;
+    patientId : Nat;
+    encounterId : ?Nat;
+    progressType : DailyProgressType;
+    noteDate : Text;          // YYYY-MM-DD
+    // SOAP sections
+    subjectiveComplaints : [Text];
+    systemReview : ?Text;
+    objectiveVitals : ?Text;
+    intakeOutput : ?Text;
+    drainMonitoring : ?Text;
+    investigations : [Text];
+    assessmentText : Text;
+    planText : Text;
+    // Active clinical state
+    activeComplaints : [Text];
+    activeDiagnoses : [Text];
+    // Authoring metadata
+    authorId : Principal;
+    authorName : Text;
+    authorRole : StaffRole;
+    isDraft : Bool;
+    // Versioning
+    createdAt : Int;
+    updatedAt : Int;
+    versionInfo : VersionedRecord;
+    previousVersionIds : [Nat];
+    isDeleted : Bool;
+  };
+
+  // ─── Sync Bootstrap ────────────────────────────────────────────────────────
+
+  public type SyncData = {
+    appointments : [Appointment];
+    queueEntries : [SerialQueueEntry];
+    timestamp : Int;       // canister time at the moment the snapshot was taken
+  };
+
+  // ─── Updated Data (lightweight multi-entity sync response) ────────────────
+
+  public type UpdatedData = {
+    patients : [Nat];          // IDs of patient records updated since sinceTimestamp
+    appointments : [Appointment];
+    queueEntries : [SerialQueueEntry];
+    timestamp : Int;
   };
 
 };

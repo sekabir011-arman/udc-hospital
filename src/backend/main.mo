@@ -1,9 +1,6 @@
 import Time "mo:core/Time";
-import _List "mo:core/List";
 import Map "mo:core/Map";
-import Array "mo:core/Array";
 import Order "mo:core/Order";
-import Iter "mo:core/Iter";
 import Runtime "mo:core/Runtime";
 import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
@@ -13,11 +10,12 @@ import MixinAuthorization "authorization/MixinAuthorization";
 import AccessControl "authorization/access-control";
 import ClinicalDataEngineLib "lib/clinical-data-engine";
 import ClinicalDataEngineMixin "mixins/clinical-data-engine-api";
+import Migration "migration";
 
 
 
 
-
+(with migration = Migration.run)
 actor {
   ///////////////////////////////
   // Custom Types and Modules  //
@@ -60,6 +58,7 @@ actor {
     pastSurgicalHistory : ?Text;
     patientType : PatientType;
     createdAt : Time.Time;
+    updatedAt : Time.Time;
     consultantEmail : ?Text;
     consultantName : ?Text;
   };
@@ -82,6 +81,7 @@ actor {
     notes : ?Text;
     visitType : VisitType;
     createdAt : Time.Time;
+    updatedAt : Time.Time;
   };
 
   module Visit {
@@ -99,6 +99,7 @@ actor {
     medications : [Medication];
     notes : ?Text;
     createdAt : Time.Time;
+    updatedAt : Time.Time;
   };
 
   module Prescription {
@@ -214,6 +215,7 @@ actor {
       pastSurgicalHistory;
       patientType;
       createdAt = Time.now();
+      updatedAt = Time.now();
       consultantEmail;
       consultantName;
     };
@@ -282,6 +284,7 @@ actor {
       pastSurgicalHistory;
       patientType;
       createdAt = existingPatient.createdAt;
+      updatedAt = Time.now();
       consultantEmail;
       consultantName;
     };
@@ -308,6 +311,7 @@ actor {
       existingPatient with
       consultantEmail = ?consultantEmail;
       consultantName = ?consultantName;
+      updatedAt = Time.now();
     };
 
     patients.add(patientId, updatedPatient);
@@ -352,6 +356,7 @@ actor {
       notes;
       visitType;
       createdAt = Time.now();
+      updatedAt = Time.now();
     };
 
     visits.add(visitIdCounter, visit);
@@ -413,6 +418,7 @@ actor {
       notes;
       visitType;
       createdAt = existingVisit.createdAt;
+      updatedAt = Time.now();
     };
 
     visits.add(id, updatedVisit);
@@ -451,6 +457,7 @@ actor {
       medications;
       notes;
       createdAt = Time.now();
+      updatedAt = Time.now();
     };
 
     prescriptions.add(prescriptionIdCounter, prescription);
@@ -513,6 +520,7 @@ actor {
       medications;
       notes;
       createdAt = existingPrescription.createdAt;
+      updatedAt = Time.now();
     };
 
     prescriptions.add(id, updatedPrescription);
@@ -525,4 +533,187 @@ actor {
     };
     prescriptions.remove(id);
   };
+
+  ////////////////////////////
+  // Sync Methods           //
+  ////////////////////////////
+
+  // Returns all patients modified at or after sinceTimestamp.
+  public query ({ caller }) func getAllPatientsSince(sinceTimestamp : Int) : async [Patient] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can sync patients");
+    };
+    patients.values().toArray().filter(func(p) { p.updatedAt >= sinceTimestamp });
+  };
+
+  // Returns all visits modified at or after sinceTimestamp.
+  public query ({ caller }) func getAllVisitsSince(sinceTimestamp : Int) : async [Visit] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can sync visits");
+    };
+    visits.values().toArray().filter(func(v) { v.updatedAt >= sinceTimestamp });
+  };
+
+  // Returns all prescriptions modified at or after sinceTimestamp.
+  public query ({ caller }) func getAllPrescriptionsSince(sinceTimestamp : Int) : async [Prescription] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can sync prescriptions");
+    };
+    prescriptions.values().toArray().filter(func(p) { p.updatedAt >= sinceTimestamp });
+  };
+
+  // getSerialQueue — convenience alias over getQueueByDateAndDoctor; provided by mixin.
+  // getAppointments — convenience alias over getAllAppointmentsByDoctor; provided by mixin.
+  // syncData, getUpdatedData, addAuditEntry, getAuditLog, getActiveAlerts, dismissAlert,
+  // createHandover, getHandover, getHandoversByPatientId, updateHandover,
+  // createDailyProgressNote, getDailyProgressNotesByPatientId, updateDailyProgressNote
+  // — all exposed by ClinicalDataEngineMixin above.
+
+  // Idempotent upsert: if record exists and incoming updatedAt is newer, update; else if absent, create.
+  public shared ({ caller }) func upsertPatient(patient : Patient) : async Patient {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can upsert patients");
+    };
+    switch (patients.get(patient.id)) {
+      case (?existing) {
+        if (patient.updatedAt > existing.updatedAt) {
+          patients.add(patient.id, patient);
+          patient;
+        } else {
+          existing;
+        };
+      };
+      case (null) {
+        // Ensure counter stays ahead of any imported id
+        if (patient.id >= patientIdCounter) {
+          patientIdCounter := patient.id + 1;
+        };
+        patients.add(patient.id, patient);
+        patient;
+      };
+    };
+  };
+
+  public shared ({ caller }) func upsertVisit(visit : Visit) : async Visit {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can upsert visits");
+    };
+    switch (visits.get(visit.id)) {
+      case (?existing) {
+        if (visit.updatedAt > existing.updatedAt) {
+          visits.add(visit.id, visit);
+          visit;
+        } else {
+          existing;
+        };
+      };
+      case (null) {
+        if (visit.id >= visitIdCounter) {
+          visitIdCounter := visit.id + 1;
+        };
+        visits.add(visit.id, visit);
+        visit;
+      };
+    };
+  };
+
+  public shared ({ caller }) func upsertPrescription(prescription : Prescription) : async Prescription {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can upsert prescriptions");
+    };
+    switch (prescriptions.get(prescription.id)) {
+      case (?existing) {
+        if (prescription.updatedAt > existing.updatedAt) {
+          prescriptions.add(prescription.id, prescription);
+          prescription;
+        } else {
+          existing;
+        };
+      };
+      case (null) {
+        if (prescription.id >= prescriptionIdCounter) {
+          prescriptionIdCounter := prescription.id + 1;
+        };
+        prescriptions.add(prescription.id, prescription);
+        prescription;
+      };
+    };
+  };
+
+  // Batch upsert — efficient for sync queue flush.
+  public shared ({ caller }) func bulkUpsertPatients(pats : [Patient]) : async [Patient] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can bulk upsert patients");
+    };
+    pats.map<Patient, Patient>(func(patient) {
+      switch (patients.get(patient.id)) {
+        case (?existing) {
+          if (patient.updatedAt > existing.updatedAt) {
+            patients.add(patient.id, patient);
+            patient;
+          } else {
+            existing;
+          };
+        };
+        case (null) {
+          if (patient.id >= patientIdCounter) {
+            patientIdCounter := patient.id + 1;
+          };
+          patients.add(patient.id, patient);
+          patient;
+        };
+      };
+    });
+  };
+
+  public shared ({ caller }) func bulkUpsertVisits(vs : [Visit]) : async [Visit] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can bulk upsert visits");
+    };
+    vs.map<Visit, Visit>(func(visit) {
+      switch (visits.get(visit.id)) {
+        case (?existing) {
+          if (visit.updatedAt > existing.updatedAt) {
+            visits.add(visit.id, visit);
+            visit;
+          } else {
+            existing;
+          };
+        };
+        case (null) {
+          if (visit.id >= visitIdCounter) {
+            visitIdCounter := visit.id + 1;
+          };
+          visits.add(visit.id, visit);
+          visit;
+        };
+      };
+    });
+  };
+
+  public shared ({ caller }) func bulkUpsertPrescriptions(prescs : [Prescription]) : async [Prescription] {
+    if (not (AccessControl.hasPermission(accessControlState, caller, #user))) {
+      Runtime.trap("Unauthorized: Only users can bulk upsert prescriptions");
+    };
+    prescs.map<Prescription, Prescription>(func(prescription) {
+      switch (prescriptions.get(prescription.id)) {
+        case (?existing) {
+          if (prescription.updatedAt > existing.updatedAt) {
+            prescriptions.add(prescription.id, prescription);
+            prescription;
+          } else {
+            existing;
+          };
+        };
+        case (null) {
+          if (prescription.id >= prescriptionIdCounter) {
+            prescriptionIdCounter := prescription.id + 1;
+          };
+          prescriptions.add(prescription.id, prescription);
+          prescription;
+        };
+      };
+    });
+  };
+
 };

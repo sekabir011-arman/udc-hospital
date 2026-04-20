@@ -11,8 +11,9 @@ import {
   FileText,
   Loader2,
   PlusCircle,
+  Users,
 } from "lucide-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useEmailAuth } from "../../hooks/useEmailAuth";
 import type { Patient } from "../../types";
 
@@ -22,24 +23,28 @@ interface LocalPatient extends Patient {
   isAdmitted?: boolean;
 }
 
-function loadAdmittedPatients(): LocalPatient[] {
+function loadAllPatients(): LocalPatient[] {
   const result: LocalPatient[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const k = localStorage.key(i);
     if (!k?.startsWith("patients_")) continue;
     try {
       const arr = JSON.parse(localStorage.getItem(k) || "[]") as LocalPatient[];
-      result.push(
-        ...arr.filter(
-          (p) =>
-            p.isAdmitted ||
-            p.patientType === "admitted" ||
-            p.status === "Admitted",
-        ),
-      );
+      result.push(...arr);
     } catch {}
   }
   return result;
+}
+
+function isAdmitted(p: LocalPatient) {
+  return (
+    p.isAdmitted === true ||
+    p.patientType === "admitted" ||
+    p.patientType === "indoor" ||
+    String((p as Record<string, unknown>).status ?? "")
+      .toLowerCase()
+      .includes("admit")
+  );
 }
 
 function getPendingDrafts() {
@@ -86,10 +91,16 @@ function getRecentActivity() {
 export default function MedicalOfficerDashboard() {
   const { currentDoctor } = useEmailAuth();
   const navigate = useNavigate();
+  const [patientFilter, setPatientFilter] = useState<"all" | "admitted">("all");
 
-  const admittedPatients = useMemo(loadAdmittedPatients, []);
+  const allPatients = useMemo(loadAllPatients, []);
   const pendingDrafts = useMemo(getPendingDrafts, []);
   const recentActivity = useMemo(getRecentActivity, []);
+
+  const admittedPatients = allPatients.filter(isAdmitted);
+  const opdPatients = allPatients.filter((p) => !isAdmitted(p));
+  const displayedPatients =
+    patientFilter === "admitted" ? admittedPatients : allPatients;
 
   return (
     <div
@@ -112,7 +123,22 @@ export default function MedicalOfficerDashboard() {
       </div>
 
       {/* Quick stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <Card className="border-0 shadow-sm">
+          <CardContent className="pt-5 pb-4 px-5 flex items-center gap-4">
+            <div className="w-11 h-11 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-foreground leading-none">
+                {allPatients.length}
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                All Patients
+              </p>
+            </div>
+          </CardContent>
+        </Card>
         <Card className="border-0 shadow-sm">
           <CardContent className="pt-5 pb-4 px-5 flex items-center gap-4">
             <div className="w-11 h-11 rounded-xl bg-green-100 text-green-700 flex items-center justify-center">
@@ -122,9 +148,20 @@ export default function MedicalOfficerDashboard() {
               <p className="text-2xl font-bold text-foreground leading-none">
                 {admittedPatients.length}
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Admitted Patients
+              <p className="text-xs text-muted-foreground mt-0.5">Admitted</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="border-0 shadow-sm">
+          <CardContent className="pt-5 pb-4 px-5 flex items-center gap-4">
+            <div className="w-11 h-11 rounded-xl bg-sky-100 text-sky-700 flex items-center justify-center">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-foreground leading-none">
+                {opdPatients.length}
               </p>
+              <p className="text-xs text-muted-foreground mt-0.5">OPD</p>
             </div>
           </CardContent>
         </Card>
@@ -143,69 +180,91 @@ export default function MedicalOfficerDashboard() {
             </div>
           </CardContent>
         </Card>
-        <Card className="border-0 shadow-sm col-span-2 lg:col-span-1">
-          <CardContent className="pt-5 pb-4 px-5 flex items-center gap-4">
-            <div className="w-11 h-11 rounded-xl bg-blue-100 text-blue-700 flex items-center justify-center">
-              <Activity className="w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-foreground leading-none">
-                {recentActivity.length}
-              </p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Recent Activities
-              </p>
-            </div>
-          </CardContent>
-        </Card>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        {/* Admitted patients */}
+        {/* Patient list with filter tabs */}
         <Card>
           <CardHeader className="pb-3 pt-4 px-5 flex flex-row items-center justify-between">
             <div className="flex items-center gap-2">
-              <BedDouble className="w-4 h-4 text-green-600" />
               <h2 className="font-semibold text-foreground text-sm">
-                Admitted Patients
+                Patients
               </h2>
             </div>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="text-xs gap-1"
-              onClick={() => navigate({ to: "/Patients" })}
-            >
-              All <ArrowRight className="w-3 h-3" />
-            </Button>
+            <div className="flex items-center gap-1">
+              {/* Filter tabs */}
+              <div className="flex border border-border rounded-lg overflow-hidden text-xs">
+                <button
+                  type="button"
+                  onClick={() => setPatientFilter("all")}
+                  className={`px-2.5 py-1 font-medium transition-colors ${patientFilter === "all" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}
+                  data-ocid="mo.filter.all_tab"
+                >
+                  All ({allPatients.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPatientFilter("admitted")}
+                  className={`px-2.5 py-1 font-medium transition-colors border-l border-border ${patientFilter === "admitted" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-muted"}`}
+                  data-ocid="mo.filter.admitted_tab"
+                >
+                  Admitted ({admittedPatients.length})
+                </button>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-xs gap-1 ml-1"
+                onClick={() => navigate({ to: "/Patients" })}
+              >
+                <ArrowRight className="w-3 h-3" />
+              </Button>
+            </div>
           </CardHeader>
           <CardContent className="px-5 pb-4 space-y-2">
-            {admittedPatients.length === 0 ? (
+            {displayedPatients.length === 0 ? (
               <div
                 className="text-center py-8 text-muted-foreground"
-                data-ocid="mo.admitted.empty_state"
+                data-ocid="mo.patients.empty_state"
               >
                 <BedDouble className="w-8 h-8 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">No admitted patients</p>
+                <p className="text-sm">
+                  {patientFilter === "admitted"
+                    ? "No admitted patients"
+                    : "No patients yet"}
+                </p>
               </div>
             ) : (
-              admittedPatients.slice(0, 6).map((p) => (
+              displayedPatients.slice(0, 6).map((p) => (
                 <div
                   key={String(p.id)}
                   className="border border-border rounded-xl p-3 flex items-center gap-3"
                   data-ocid={`mo.patient_card.${String(p.id)}`}
                 >
-                  <div className="w-9 h-9 rounded-full bg-green-100 flex items-center justify-center shrink-0">
-                    <span className="font-bold text-green-700 text-sm">
+                  <div
+                    className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${isAdmitted(p) ? "bg-green-100" : "bg-sky-100"}`}
+                  >
+                    <span
+                      className={`font-bold text-sm ${isAdmitted(p) ? "text-green-700" : "text-sky-700"}`}
+                    >
                       {p.fullName.charAt(0)}
                     </span>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-semibold text-sm text-foreground truncate">
-                      {p.fullName}
-                    </p>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="font-semibold text-sm text-foreground truncate">
+                        {p.fullName}
+                      </p>
+                      {isAdmitted(p) && (
+                        <Badge className="text-[10px] bg-green-100 text-green-800 border border-green-300 shrink-0">
+                          🏥 Admitted
+                        </Badge>
+                      )}
+                    </div>
                     <p className="text-xs text-muted-foreground">
-                      Bed {p.bedNumber || "—"} · {p.ward || "General"}
+                      {isAdmitted(p)
+                        ? `Bed ${p.bedNumber || "—"} · ${p.ward || "General"}`
+                        : "OPD Patient"}
                     </p>
                   </div>
                   <div className="flex gap-1">

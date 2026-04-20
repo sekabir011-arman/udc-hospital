@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useNavigate } from "@tanstack/react-router";
 import {
-  AlertCircle,
   Calendar,
   Droplets,
   Hash,
@@ -49,12 +48,10 @@ function getAge(dateOfBirth?: bigint): string {
 function PatientCard({
   patient,
   index,
-  restricted,
   assignedToCurrentUser,
 }: {
   patient: Patient;
   index: number;
-  restricted?: boolean;
   assignedToCurrentUser?: boolean;
 }) {
   const navigate = useNavigate();
@@ -67,10 +64,6 @@ function PatientCard({
     | undefined;
 
   const handleClick = () => {
-    if (restricted) {
-      toast.warning("You can only access admitted patients");
-      return;
-    }
     navigate({
       to: "/PatientProfile",
       search: { id: String(patient.id) },
@@ -88,7 +81,7 @@ function PatientCard({
       <button
         type="button"
         onClick={handleClick}
-        className={`w-full text-left bg-card border border-border rounded-xl p-4 hover:shadow-elevated hover:border-primary/30 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${restricted ? "opacity-60" : ""}`}
+        className="w-full text-left bg-card border border-border rounded-xl p-4 hover:shadow-elevated hover:border-primary/30 transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <div className="flex items-start gap-4">
           <div
@@ -198,19 +191,8 @@ export default function Patients() {
     currentDoctor?.role === "consultant_doctor" ||
     currentDoctor?.role === "doctor";
 
-  // MO / Intern / Nurse can only access admitted/inpatient patients
-  const inpatientOnly = !permissions.canAccessOutpatient;
-
   const showDueMeds =
     currentDoctor?.role === "nurse" || currentDoctor?.role === "intern_doctor";
-
-  const isAdmitted = (p: Patient) =>
-    p.isAdmitted === true ||
-    p.patientType === "admitted" ||
-    p.patientType === "indoor" ||
-    String((p as Record<string, unknown>).status ?? "")
-      .toLowerCase()
-      .includes("admit");
 
   const baseFiltered = patients.filter(
     (p) =>
@@ -271,19 +253,7 @@ export default function Patients() {
         </div>
       )}
 
-      {/* Admitted-only notice for MO / Intern / Nurse */}
-      {inpatientOnly && (
-        <div
-          className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl px-4 py-2.5 mb-4 text-sm text-blue-700"
-          data-ocid="patients.inpatient_only_notice"
-        >
-          <AlertCircle className="w-4 h-4 shrink-0 text-blue-500" />
-          <span>
-            <strong>Showing admitted patients only.</strong> Your role restricts
-            clinical access to inpatient/admitted patients.
-          </span>
-        </div>
-      )}
+      {/* Admitted-only notice removed — all clinical roles can now see all patients */}
 
       {/* Search */}
       <div className="relative mb-5">
@@ -318,9 +288,7 @@ export default function Patients() {
           <p className="text-sm text-muted-foreground">
             {search
               ? "Try a different search term or register number"
-              : inpatientOnly
-                ? "No admitted patients at this time"
-                : "Register your first patient to get started"}
+              : "Register your first patient to get started"}
           </p>
           {!search && permissions.canRegisterPatients && (
             <Button
@@ -342,7 +310,6 @@ export default function Patients() {
                 key={patient.id.toString()}
                 patient={patient}
                 index={idx}
-                restricted={inpatientOnly && !isAdmitted(patient)}
                 assignedToCurrentUser={
                   isConsultant &&
                   !!patient.consultantAssignment &&

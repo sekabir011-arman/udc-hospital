@@ -127,6 +127,35 @@ export interface ClinicalOrder {
   'encounterId' : [] | [bigint],
 }
 export interface CurrentUser { 'principal' : Principal, 'role' : UserRole }
+export interface DailyProgressNote {
+  'id' : bigint,
+  'isDeleted' : boolean,
+  'drainMonitoring' : [] | [string],
+  'patientId' : bigint,
+  'authorId' : Principal,
+  'createdAt' : bigint,
+  'authorName' : string,
+  'authorRole' : StaffRole,
+  'noteDate' : string,
+  'objectiveVitals' : [] | [string],
+  'assessmentText' : string,
+  'subjectiveComplaints' : Array<string>,
+  'isDraft' : boolean,
+  'updatedAt' : bigint,
+  'activeDiagnoses' : Array<string>,
+  'progressType' : DailyProgressType,
+  'activeComplaints' : Array<string>,
+  'previousVersionIds' : Array<bigint>,
+  'versionInfo' : VersionedRecord,
+  'encounterId' : [] | [bigint],
+  'planText' : string,
+  'systemReview' : [] | [string],
+  'intakeOutput' : [] | [string],
+  'investigations' : Array<string>,
+}
+export type DailyProgressType = { 'morning' : null } |
+  { 'evening' : null } |
+  { 'emergency' : null };
 export interface DiagnosisTemplate {
   'id' : bigint,
   'createdAt' : bigint,
@@ -165,6 +194,45 @@ export type EncounterType = { 'IPD' : null } |
 export type Gender = { 'other' : null } |
   { 'female' : null } |
   { 'male' : null };
+export interface HandoverEntry {
+  'id' : bigint,
+  'status' : HandoverStatus,
+  'takenByName' : [] | [string],
+  'takenByRole' : [] | [StaffRole],
+  'clinicalSummary' : string,
+  'currentConsultant' : [] | [string],
+  'consultantComment' : [] | [string],
+  'patientId' : bigint,
+  'dayOfStay' : [] | [bigint],
+  'createdAt' : bigint,
+  'ward' : [] | [string],
+  'pendingInvestigations' : Array<string>,
+  'vitalsSummary' : [] | [string],
+  'bedNumber' : [] | [string],
+  'registerNumber' : [] | [string],
+  'diagnosis' : [] | [string],
+  'missedMedications' : Array<string>,
+  'shift' : HandoverShift,
+  'updatedAt' : bigint,
+  'givenByPrincipal' : Principal,
+  'givenByName' : string,
+  'consultantCommentAt' : [] | [bigint],
+  'consultantCommentBy' : [] | [Principal],
+  'givenByRole' : StaffRole,
+  'takenByPrincipal' : [] | [Principal],
+  'patientName' : string,
+  'shiftEndTime' : bigint,
+  'pendingProcedures' : Array<string>,
+  'tasksPending' : Array<string>,
+  'versionInfo' : VersionedRecord,
+  'shiftStartTime' : bigint,
+  'actionableItems' : Array<string>,
+}
+export type HandoverShift = { 'morning' : null } |
+  { 'evening' : null } |
+  { 'night' : null };
+export type HandoverStatus = { 'submitted' : null } |
+  { 'draft' : null };
 export interface Medication {
   'duration' : string,
   'dose' : string,
@@ -225,6 +293,7 @@ export interface Patient {
   'createdAt' : Time,
   'fullName' : string,
   'email' : [] | [string],
+  'updatedAt' : Time,
   'pastSurgicalHistory' : [] | [string],
   'bloodGroup' : [] | [string],
   'address' : [] | [string],
@@ -242,6 +311,7 @@ export interface Prescription {
   'createdAt' : Time,
   'diagnosis' : [] | [string],
   'prescriptionDate' : Time,
+  'updatedAt' : Time,
   'medications' : Array<Medication>,
   'notes' : [] | [string],
   'visitId' : [] | [bigint],
@@ -257,6 +327,7 @@ export interface SerialQueueEntry {
   'createdAt' : bigint,
   'registerNumber' : [] | [string],
   'calledAt' : [] | [bigint],
+  'updatedAt' : bigint,
   'serialNumber' : bigint,
   'patientName' : string,
   'phone' : [] | [string],
@@ -270,6 +341,11 @@ export type StaffRole = { 'patient' : null } |
   { 'consultant_doctor' : null } |
   { 'staff' : null } |
   { 'nurse' : null };
+export interface SyncData {
+  'queueEntries' : Array<SerialQueueEntry>,
+  'appointments' : Array<Appointment>,
+  'timestamp' : bigint,
+}
 export interface SyncRecord {
   'id' : bigint,
   'lastEntityType' : [] | [string],
@@ -280,6 +356,12 @@ export interface SyncRecord {
   'lastEntityId' : [] | [bigint],
 }
 export type Time = bigint;
+export interface UpdatedData {
+  'queueEntries' : Array<SerialQueueEntry>,
+  'appointments' : Array<Appointment>,
+  'timestamp' : bigint,
+  'patients' : Array<bigint>,
+}
 export interface UserProfile { 'name' : string }
 export type UserRole = { 'admin' : null } |
   { 'user' : null } |
@@ -300,6 +382,7 @@ export interface Visit {
   'visitDate' : Time,
   'visitType' : VisitType,
   'diagnosis' : [] | [string],
+  'updatedAt' : Time,
   'historyOfPresentIllness' : [] | [string],
   'notes' : [] | [string],
   'physicalExamination' : [] | [string],
@@ -326,6 +409,10 @@ export interface _SERVICE {
     { 'ok' : Observation } |
       { 'err' : string }
   >,
+  'addAuditEntry' : ActorMethod<
+    [string, bigint, string, [] | [string], string, [] | [string]],
+    undefined
+  >,
   'assignBed' : ActorMethod<
     [bigint, bigint, string],
     { 'ok' : BedRecord } |
@@ -338,11 +425,17 @@ export interface _SERVICE {
     { 'ok' : bigint } |
       { 'err' : string }
   >,
+  'bulkUpsertPatients' : ActorMethod<[Array<Patient>], Array<Patient>>,
+  'bulkUpsertPrescriptions' : ActorMethod<
+    [Array<Prescription>],
+    Array<Prescription>
+  >,
   'bulkUpsertQueueEntries' : ActorMethod<
     [Array<SerialQueueEntry>],
     { 'ok' : bigint } |
       { 'err' : string }
   >,
+  'bulkUpsertVisits' : ActorMethod<[Array<Visit>], Array<Visit>>,
   'clearQueueByDate' : ActorMethod<
     [string, string],
     { 'ok' : bigint } |
@@ -383,6 +476,27 @@ export interface _SERVICE {
     { 'ok' : ClinicalNote } |
       { 'err' : string }
   >,
+  'createDailyProgressNote' : ActorMethod<
+    [
+      bigint,
+      [] | [bigint],
+      DailyProgressType,
+      string,
+      Array<string>,
+      [] | [string],
+      [] | [string],
+      [] | [string],
+      [] | [string],
+      Array<string>,
+      string,
+      string,
+      Array<string>,
+      Array<string>,
+      boolean,
+    ],
+    { 'ok' : DailyProgressNote } |
+      { 'err' : string }
+  >,
   'createDiagnosisTemplate' : ActorMethod<
     [
       string,
@@ -399,6 +513,30 @@ export interface _SERVICE {
   'createEncounter' : ActorMethod<
     [bigint, EncounterType, [] | [string]],
     { 'ok' : Encounter } |
+      { 'err' : string }
+  >,
+  'createHandover' : ActorMethod<
+    [
+      bigint,
+      HandoverShift,
+      bigint,
+      bigint,
+      string,
+      [] | [string],
+      [] | [string],
+      [] | [string],
+      [] | [string],
+      [] | [bigint],
+      [] | [string],
+      string,
+      [] | [string],
+      Array<string>,
+      Array<string>,
+      Array<string>,
+      Array<string>,
+      Array<string>,
+    ],
+    { 'ok' : HandoverEntry } |
       { 'err' : string }
   >,
   'createObservation' : ActorMethod<
@@ -501,6 +639,12 @@ export interface _SERVICE {
     { 'ok' : BedRecord } |
       { 'err' : string }
   >,
+  'dismissAlert' : ActorMethod<
+    [bigint],
+    { 'ok' : ClinicalAlert } |
+      { 'err' : string }
+  >,
+  'getActiveAlerts' : ActorMethod<[bigint], Array<ClinicalAlert>>,
   'getActiveOrdersByPatient' : ActorMethod<[bigint], Array<ClinicalOrder>>,
   'getAlertsByPatient' : ActorMethod<[bigint], Array<ClinicalAlert>>,
   'getAllAppointmentsByDoctor' : ActorMethod<
@@ -513,8 +657,11 @@ export interface _SERVICE {
   'getAllDiagnosisTemplates' : ActorMethod<[], Array<DiagnosisTemplate>>,
   'getAllEncounters' : ActorMethod<[], Array<Encounter>>,
   'getAllPatients' : ActorMethod<[], Array<Patient>>,
+  'getAllPatientsSince' : ActorMethod<[bigint], Array<Patient>>,
   'getAllPrescriptions' : ActorMethod<[], Array<Prescription>>,
+  'getAllPrescriptionsSince' : ActorMethod<[bigint], Array<Prescription>>,
   'getAllVisits' : ActorMethod<[], Array<Visit>>,
+  'getAllVisitsSince' : ActorMethod<[bigint], Array<Visit>>,
   'getAppointmentById' : ActorMethod<
     [string],
     { 'ok' : [] | [Appointment] } |
@@ -530,6 +677,7 @@ export interface _SERVICE {
     { 'ok' : Array<Appointment> } |
       { 'err' : string }
   >,
+  'getAuditLog' : ActorMethod<[bigint, bigint, bigint], Array<AuditEntry>>,
   'getAuditTrail' : ActorMethod<[bigint, bigint, bigint], Array<AuditEntry>>,
   'getAvailableBeds' : ActorMethod<[], Array<BedRecord>>,
   'getCallerUserProfile' : ActorMethod<[], [] | [UserProfile]>,
@@ -540,9 +688,21 @@ export interface _SERVICE {
     Array<ClinicalNote>
   >,
   'getCurrentUser' : ActorMethod<[], CurrentUser>,
+  'getDailyProgressNotesByPatientId' : ActorMethod<
+    [bigint],
+    Array<DailyProgressNote>
+  >,
   'getDiagnosisTemplate' : ActorMethod<[bigint], [] | [DiagnosisTemplate]>,
   'getEncountersByPatient' : ActorMethod<[bigint], Array<Encounter>>,
+  'getFullSyncData' : ActorMethod<
+    [string],
+    { 'ok' : SyncData } |
+      { 'err' : string }
+  >,
+  'getHandover' : ActorMethod<[bigint], [] | [HandoverEntry]>,
+  'getHandoversByPatientId' : ActorMethod<[bigint], Array<HandoverEntry>>,
   'getLastSyncTime' : ActorMethod<[string], [] | [bigint]>,
+  'getLastSyncTimestamp' : ActorMethod<[], bigint>,
   'getObservationsByPatient' : ActorMethod<[bigint], Array<Observation>>,
   'getObservationsByType' : ActorMethod<
     [bigint, ObservationType],
@@ -565,6 +725,11 @@ export interface _SERVICE {
       { 'err' : string }
   >,
   'getUnacknowledgedAlerts' : ActorMethod<[], Array<ClinicalAlert>>,
+  'getUpdatedData' : ActorMethod<
+    [string, bigint],
+    { 'ok' : UpdatedData } |
+      { 'err' : string }
+  >,
   'getUserProfile' : ActorMethod<[Principal], [] | [UserProfile]>,
   'getVisit' : ActorMethod<[bigint], [] | [Visit]>,
   'getVisitsByPatientId' : ActorMethod<[bigint], Array<Visit>>,
@@ -585,6 +750,7 @@ export interface _SERVICE {
       { 'err' : string }
   >,
   'saveCallerUserProfile' : ActorMethod<[UserProfile], undefined>,
+  'syncData' : ActorMethod<[string], { 'ok' : SyncData } | { 'err' : string }>,
   'transferBed' : ActorMethod<
     [bigint, bigint, string],
     { 'ok' : BedRecord } |
@@ -614,6 +780,25 @@ export interface _SERVICE {
     { 'ok' : ClinicalNote } |
       { 'err' : string }
   >,
+  'updateDailyProgressNote' : ActorMethod<
+    [
+      bigint,
+      Array<string>,
+      [] | [string],
+      [] | [string],
+      [] | [string],
+      [] | [string],
+      Array<string>,
+      string,
+      string,
+      Array<string>,
+      Array<string>,
+      boolean,
+      [] | [string],
+    ],
+    { 'ok' : DailyProgressNote } |
+      { 'err' : string }
+  >,
   'updateDiagnosisTemplate' : ActorMethod<
     [
       bigint,
@@ -631,6 +816,25 @@ export interface _SERVICE {
   'updateEncounter' : ActorMethod<
     [bigint, bigint, EncounterStatus, [] | [bigint], [] | [string]],
     { 'ok' : Encounter } |
+      { 'err' : string }
+  >,
+  'updateHandover' : ActorMethod<
+    [
+      bigint,
+      string,
+      [] | [string],
+      Array<string>,
+      Array<string>,
+      Array<string>,
+      Array<string>,
+      Array<string>,
+      [] | [string],
+      [] | [StaffRole],
+      [] | [Principal],
+      [] | [string],
+      HandoverStatus,
+    ],
+    { 'ok' : HandoverEntry } |
       { 'err' : string }
   >,
   'updateOrderStatus' : ActorMethod<
@@ -692,6 +896,9 @@ export interface _SERVICE {
     ],
     Visit
   >,
+  'upsertPatient' : ActorMethod<[Patient], Patient>,
+  'upsertPrescription' : ActorMethod<[Prescription], Prescription>,
+  'upsertVisit' : ActorMethod<[Visit], Visit>,
 }
 export declare const idlService: IDL.ServiceClass;
 export declare const idlInitArgs: IDL.Type[];

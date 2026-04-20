@@ -4250,6 +4250,72 @@ export default function PatientDashboardInner({
                   return "Unknown";
                 }
               })()}
+              currentUser={{
+                name: (() => {
+                  try {
+                    const session = localStorage.getItem(
+                      "medicare_current_doctor",
+                    );
+                    if (!session)
+                      return currentRole === "patient"
+                        ? patient.fullName
+                        : "Unknown";
+                    const registry: Array<{ id: string; name: string }> =
+                      JSON.parse(
+                        localStorage.getItem("medicare_doctors_registry") ||
+                          "[]",
+                      );
+                    return (
+                      registry.find((d) => d.id === session)?.name ?? "Unknown"
+                    );
+                  } catch {
+                    return "Unknown";
+                  }
+                })(),
+                role: viewerRole ?? "doctor",
+                email: (() => {
+                  try {
+                    const session = localStorage.getItem(
+                      "medicare_current_doctor",
+                    );
+                    if (!session) return "";
+                    const registry: Array<{ id: string; email?: string }> =
+                      JSON.parse(
+                        localStorage.getItem("medicare_doctors_registry") ||
+                          "[]",
+                      );
+                    return (
+                      (
+                        registry.find((d) => d.id === session) as {
+                          email?: string;
+                        }
+                      )?.email ?? session
+                    );
+                  } catch {
+                    return "";
+                  }
+                })(),
+              }}
+              admissionDate={
+                ((patient as Record<string, unknown>)
+                  .admissionDate as string) ?? ""
+              }
+              bedNumber={
+                ((patient as Record<string, unknown>).bedNumber as string) ?? ""
+              }
+              department={
+                ((patient as Record<string, unknown>).department as string) ??
+                ""
+              }
+              primaryDiagnosis={
+                prescriptions.find((rx) => rx.diagnosis)?.diagnosis ?? ""
+              }
+              secondaryDiagnoses={[]}
+              comorbidities={[]}
+              assignedConsultant={
+                ((patient as Record<string, unknown>)
+                  .assignedConsultantName as string) ?? ""
+              }
               latestVitals={latestVitals}
               activeMedications={prescriptions
                 .flatMap((rx) =>

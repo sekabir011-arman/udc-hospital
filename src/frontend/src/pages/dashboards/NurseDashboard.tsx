@@ -12,8 +12,10 @@ import {
   Clock,
   Droplets,
   Moon,
+  Search,
   Sun,
   Sunset,
+  Users,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
@@ -42,6 +44,19 @@ function loadAdmittedPatients(): LocalPatient[] {
             p.status === "Admitted",
         ),
       );
+    } catch {}
+  }
+  return result;
+}
+
+function loadAllPatients(): LocalPatient[] {
+  const result: LocalPatient[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k?.startsWith("patients_")) continue;
+    try {
+      const arr = JSON.parse(localStorage.getItem(k) || "[]") as LocalPatient[];
+      result.push(...arr);
     } catch {}
   }
   return result;
@@ -195,8 +210,11 @@ export default function NurseDashboard() {
   const navigate = useNavigate();
   const shift = getCurrentShift();
   const ShiftIcon = shift.icon;
+  const [allPatientsSearch, setAllPatientsSearch] = useState("");
+  const [showAllPatients, setShowAllPatients] = useState(false);
 
   const admittedPatients = useMemo(loadAdmittedPatients, []);
+  const allPatients = useMemo(loadAllPatients, []);
   const medsDue = useMemo(
     () => getMedsDue(admittedPatients),
     [admittedPatients],
@@ -469,6 +487,7 @@ export default function NurseDashboard() {
 
       {/* Shift Handover */}
       <Card className="border-indigo-200">
+        {" "}
         <CardHeader className="pb-3 pt-4 px-5">
           <div className="flex items-center gap-2">
             <ClipboardList className="w-4 h-4 text-indigo-600" />
@@ -530,6 +549,117 @@ export default function NurseDashboard() {
             </Button>
           )}
         </CardContent>
+      </Card>
+
+      {/* All Patients — secondary lookup section */}
+      <Card>
+        <CardHeader className="pb-3 pt-4 px-5">
+          <button
+            type="button"
+            className="flex items-center justify-between w-full text-left"
+            onClick={() => setShowAllPatients((v) => !v)}
+            data-ocid="nurse.all_patients.toggle"
+          >
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-primary" />
+              <h2 className="font-semibold text-foreground text-sm">
+                All Patients
+              </h2>
+              <Badge className="text-xs bg-muted text-muted-foreground border-border">
+                {allPatients.length}
+              </Badge>
+            </div>
+            <span className="text-xs text-muted-foreground">
+              {showAllPatients ? "Hide ▲" : "Show ▼"}
+            </span>
+          </button>
+        </CardHeader>
+        {showAllPatients && (
+          <CardContent className="px-5 pb-4 space-y-3">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+              <input
+                type="text"
+                className="w-full border border-border rounded-lg pl-8 pr-3 py-2 text-sm bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20"
+                placeholder="Search patients…"
+                value={allPatientsSearch}
+                onChange={(e) => setAllPatientsSearch(e.target.value)}
+                data-ocid="nurse.all_patients.search_input"
+              />
+            </div>
+            {allPatients
+              .filter(
+                (p) =>
+                  !allPatientsSearch ||
+                  p.fullName
+                    .toLowerCase()
+                    .includes(allPatientsSearch.toLowerCase()) ||
+                  (p.phone ?? "").includes(allPatientsSearch) ||
+                  ((p as Record<string, unknown>).registerNumber ?? "")
+                    .toString()
+                    .includes(allPatientsSearch),
+              )
+              .slice(0, 10)
+              .map((p) => {
+                const admitted =
+                  p.isAdmitted ||
+                  p.patientType === "admitted" ||
+                  p.status === "Admitted";
+                return (
+                  <button
+                    key={String(p.id)}
+                    type="button"
+                    onClick={() =>
+                      navigate({
+                        to: "/PatientProfile",
+                        search: { id: String(p.id) },
+                      })
+                    }
+                    className="w-full border border-border rounded-xl p-3 flex items-center gap-3 hover:bg-muted/30 transition-colors text-left"
+                    data-ocid={`nurse.all_patients_item.${String(p.id)}`}
+                  >
+                    <div
+                      className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 ${admitted ? "bg-green-100" : "bg-sky-100"}`}
+                    >
+                      <span
+                        className={`font-bold text-xs ${admitted ? "text-green-700" : "text-sky-700"}`}
+                      >
+                        {p.fullName.charAt(0)}
+                      </span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-medium text-foreground truncate">
+                          {p.fullName}
+                        </p>
+                        {admitted && (
+                          <Badge className="text-[10px] bg-green-100 text-green-800 border border-green-300 shrink-0">
+                            Admitted
+                          </Badge>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        {admitted ? `Bed ${p.bedNumber || "—"}` : "OPD"}
+                      </p>
+                    </div>
+                    <ArrowRight className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  </button>
+                );
+              })}
+            {allPatients.length > 10 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="w-full text-xs gap-1"
+                onClick={() => navigate({ to: "/Patients" })}
+                data-ocid="nurse.all_patients.view_all_button"
+              >
+                View all {allPatients.length} patients{" "}
+                <ArrowRight className="w-3 h-3" />
+              </Button>
+            )}
+          </CardContent>
+        )}
       </Card>
     </div>
   );

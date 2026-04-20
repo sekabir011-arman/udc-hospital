@@ -1,21 +1,35 @@
 // ─── Hybrid Storage Layer ─────────────────────────────────────────────────────
 // Wraps localStorage (offline-first ground truth) + canister backend (cloud sync).
 // Strategy:
-//   READ  → try canister first when online, fallback to localStorage silently
-//   WRITE → always write localStorage immediately, queue for canister sync
-//   SYNC  → background flush of sync queue + pull of remote updates every 15s
+//   READ  → localStorage (always fresh after sync cycle)
+//   WRITE → localStorage immediately, then canister directly or enqueue
+//   SYNC  → bootstrap on first load, then incremental pull every 15s
 
 import {
+  getDoctorEmail,
   loadFromStorage,
   saveToStorage,
   storageKey,
 } from "../hooks/useQueries";
 
+// ─── Queue item types ──────────────────────────────────────────────────────────
+
+export type SyncQueueItemType =
+  | "upsertPatient"
+  | "upsertVisit"
+  | "upsertPrescription"
+  | "upsertAppointment"
+  | "upsertQueueEntry";
+
 export interface SyncQueueItem {
   id: string;
   timestamp: number;
-  operation: "create" | "update" | "delete";
-  entityType: string;
+  /** New typed field — used for new writes; optional for backward compat */
+  type?: SyncQueueItemType;
+  /** Legacy compat — used by old enqueueSync callers */
+  operation?: "create" | "update" | "delete";
+  /** Legacy compat */
+  entityType?: string;
   entityId?: string;
   data: unknown;
   retryCount: number;
@@ -27,12 +41,22 @@ export interface SyncStatus {
   lastSyncAt?: Date;
 }
 
+export interface MigrationProgress {
+  total: number;
+  migrated: number;
+  message: string;
+}
+
+// ─── Storage keys ─────────────────────────────────────────────────────────────
+
 const SYNC_QUEUE_KEY = "medicare_sync_queue";
 const LAST_SYNC_KEY = "medicare_last_sync_at";
+/** Stores the last canister sync timestamp as a bigint string (nanoseconds) */
+const LAST_SYNC_TS_KEY = "medicare_last_sync_ts";
 const MIGRATION_DONE_KEY = "medicare_migration_v1_done";
 const DEVICE_ID_KEY = "medicare_device_id";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getDeviceId(): string {
   let id = localStorage.getItem(DEVICE_ID_KEY);
@@ -59,6 +83,23 @@ function saveSyncQueue(queue: SyncQueueItem[]): void {
   } catch {}
 }
 
+function getLastSyncTs(): bigint {
+  try {
+    const raw = localStorage.getItem(LAST_SYNC_TS_KEY);
+    if (!raw || raw === "0") return 0n;
+    return BigInt(raw);
+  } catch {
+    return 0n;
+  }
+}
+
+function setLastSyncTs(ts: bigint): void {
+  try {
+    localStorage.setItem(LAST_SYNC_TS_KEY, ts.toString());
+    localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
+  } catch {}
+}
+
 export function isMigrationDone(): boolean {
   return localStorage.getItem(MIGRATION_DONE_KEY) === "true";
 }
@@ -67,7 +108,7 @@ export function markMigrationDone(): void {
   localStorage.setItem(MIGRATION_DONE_KEY, "true");
 }
 
-// ── Network probe ─────────────────────────────────────────────────────────────
+// ─── Network probe ────────────────────────────────────────────────────────────
 
 let _isOnlineCache = navigator.onLine;
 window.addEventListener("online", () => {
@@ -81,18 +122,40 @@ export function isNetworkOnline(): boolean {
   return _isOnlineCache;
 }
 
-// ── Sync queue operations ─────────────────────────────────────────────────────
+// ─── Sync queue operations ────────────────────────────────────────────────────
 
 export function enqueueSync(
   item: Omit<SyncQueueItem, "id" | "retryCount">,
 ): void {
   const queue = loadSyncQueue();
-  queue.push({
-    ...item,
-    id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    retryCount: 0,
+  // Deduplicate: if same type+entityId already queued, replace it (keep latest)
+  const entityId =
+    item.entityId ?? (item.data as Record<string, unknown>)?.id?.toString();
+  let replaced = false;
+  const newQueue = queue.map((q) => {
+    if (
+      q.type === item.type &&
+      entityId &&
+      (q.entityId === entityId ||
+        String((q.data as Record<string, unknown>)?.id) === entityId)
+    ) {
+      replaced = true;
+      return {
+        ...item,
+        id: q.id, // keep original id
+        retryCount: 0,
+      };
+    }
+    return q;
   });
-  saveSyncQueue(queue);
+  if (!replaced) {
+    newQueue.push({
+      ...item,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+      retryCount: 0,
+    });
+  }
+  saveSyncQueue(newQueue);
 }
 
 export function getPendingChangesCount(): number {
@@ -114,21 +177,568 @@ export function getSyncStatus(): SyncStatus {
   };
 }
 
-// ── Migration: localStorage → canister ───────────────────────────────────────
+// ─── Merge helpers ────────────────────────────────────────────────────────────
 
-export interface MigrationProgress {
-  total: number;
-  migrated: number;
-  message: string;
+/**
+ * Merge two arrays by id. If both have a record with the same id,
+ * the one with the higher `updatedAt` wins (last-writer-wins).
+ * Falls back to preferring remote if no updatedAt is present.
+ */
+function mergeByIdLastWriterWins<
+  T extends { id: unknown; updatedAt?: unknown },
+>(local: T[], remote: T[]): T[] {
+  const resultMap = new Map<string, T>();
+
+  // Seed with local
+  for (const item of local) {
+    resultMap.set(String(item.id), item);
+  }
+
+  // Merge remote — last-writer-wins on updatedAt
+  for (const remoteItem of remote) {
+    const key = String(remoteItem.id);
+    const localItem = resultMap.get(key);
+    if (!localItem) {
+      resultMap.set(key, remoteItem);
+    } else {
+      // Compare updatedAt — higher wins
+      const remoteTs = BigInt(String(remoteItem.updatedAt ?? 0));
+      const localTs = BigInt(String(localItem.updatedAt ?? 0));
+      if (remoteTs >= localTs) {
+        resultMap.set(key, remoteItem);
+      }
+      // else keep local (it's newer)
+    }
+  }
+
+  return Array.from(resultMap.values());
 }
 
-/** Gathers all patient/visit/prescription data from every localStorage doctor key */
-function gatherAllLocalData(): {
-  patientsJson: string;
-  visitsJson: string;
-  prescriptionsJson: string;
-  appointmentsJson: string;
-} {
+/** Remove queue items matching a set of entity ids for a given type */
+function removeFromQueue(type: SyncQueueItemType, ids: Set<string>): void {
+  const queue = loadSyncQueue();
+  const remaining = queue.filter((q) => {
+    if (q.type !== type) return true;
+    const itemId =
+      q.entityId ?? String((q.data as Record<string, unknown>)?.id ?? "");
+    return !ids.has(itemId);
+  });
+  saveSyncQueue(remaining);
+}
+
+// ─── Bootstrap: full hydration from canister on first load ───────────────────
+
+/**
+ * Full bootstrap sync from canister.
+ * Fetches appointments + queue entries via getFullSyncData,
+ * and patients/visits/prescriptions via their respective getAllXxxSince(0).
+ * Merges all into localStorage. Sets LAST_SYNC_TS_KEY.
+ * Safe to call multiple times — idempotent.
+ */
+export async function bootstrapFromCanister(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  actor: any,
+): Promise<{ success: boolean; recordsLoaded: number }> {
+  if (!isNetworkOnline() || !actor) {
+    return { success: false, recordsLoaded: 0 };
+  }
+
+  let recordsLoaded = 0;
+
+  try {
+    // Pull patients, visits, prescriptions in parallel (since ts=0 = all records)
+    const [remotePatients, remoteVisits, remotePrescriptions, syncDataResult] =
+      await Promise.all([
+        actor.getAllPatients() as Promise<unknown[]>,
+        actor.getAllVisits() as Promise<unknown[]>,
+        actor.getAllPrescriptions() as Promise<unknown[]>,
+        actor.getFullSyncData(getDoctorEmail()),
+      ]);
+
+    // ── Patients ────────────────────────────────────────────────────────────
+    if (Array.isArray(remotePatients) && remotePatients.length > 0) {
+      const key = storageKey("patients");
+      const local = loadFromStorage<{ id: unknown; updatedAt?: unknown }>(key);
+      const merged = mergeByIdLastWriterWins(
+        local,
+        remotePatients as typeof local,
+      );
+      saveToStorage(key, merged);
+      recordsLoaded += remotePatients.length;
+    }
+
+    // ── Visits ──────────────────────────────────────────────────────────────
+    if (Array.isArray(remoteVisits) && remoteVisits.length > 0) {
+      const key = storageKey("visits");
+      const local = loadFromStorage<{ id: unknown; updatedAt?: unknown }>(key);
+      const merged = mergeByIdLastWriterWins(
+        local,
+        remoteVisits as typeof local,
+      );
+      saveToStorage(key, merged);
+      recordsLoaded += remoteVisits.length;
+    }
+
+    // ── Prescriptions ────────────────────────────────────────────────────────
+    if (Array.isArray(remotePrescriptions) && remotePrescriptions.length > 0) {
+      const key = storageKey("prescriptions");
+      const local = loadFromStorage<{ id: unknown; updatedAt?: unknown }>(key);
+      const merged = mergeByIdLastWriterWins(
+        local,
+        remotePrescriptions as typeof local,
+      );
+      saveToStorage(key, merged);
+      recordsLoaded += remotePrescriptions.length;
+    }
+
+    // ── Appointments + Queue (from getFullSyncData) ──────────────────────────
+    if (syncDataResult?.__kind__ === "ok") {
+      const syncData = syncDataResult.ok as {
+        appointments: unknown[];
+        queueEntries: unknown[];
+        timestamp: bigint;
+      };
+
+      if (
+        Array.isArray(syncData.appointments) &&
+        syncData.appointments.length > 0
+      ) {
+        const local = loadFromStorage<{ id: unknown; updatedAt?: unknown }>(
+          "clinic_appointments",
+        );
+        const merged = mergeByIdLastWriterWins(
+          local,
+          syncData.appointments as typeof local,
+        );
+        saveToStorage("clinic_appointments", merged);
+        recordsLoaded += syncData.appointments.length;
+      }
+
+      if (
+        Array.isArray(syncData.queueEntries) &&
+        syncData.queueEntries.length > 0
+      ) {
+        _mergeQueueEntries(
+          syncData.queueEntries as Array<Record<string, unknown>>,
+        );
+        recordsLoaded += syncData.queueEntries.length;
+      }
+    }
+
+    // ── Update timestamp ────────────────────────────────────────────────────
+    try {
+      const ts = (await actor.getLastSyncTimestamp()) as bigint;
+      setLastSyncTs(ts);
+    } catch {
+      setLastSyncTs(BigInt(Date.now()) * 1_000_000n);
+    }
+
+    return { success: true, recordsLoaded };
+  } catch (err) {
+    console.error(
+      `[sync] bootstrapFromCanister error at ${new Date().toISOString()}:`,
+      err,
+    );
+    return { success: false, recordsLoaded };
+  }
+}
+
+// ─── Incremental pull ─────────────────────────────────────────────────────────
+
+/**
+ * Pull only records updated since the last sync timestamp.
+ * Much cheaper than a full bootstrap after the initial load.
+ */
+export async function pollAndUpdateFromCanister(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  actor: any,
+): Promise<{ success: boolean; updated: number }> {
+  if (!isNetworkOnline() || !actor) {
+    return { success: false, updated: 0 };
+  }
+
+  const lastTs = getLastSyncTs();
+  let updated = 0;
+
+  try {
+    const doctorEmail = getDoctorEmail();
+
+    // Fire all incremental pulls in parallel
+    const [
+      remotePatients,
+      remoteVisits,
+      remotePrescriptions,
+      remoteApptsResult,
+      remoteQueueResult,
+    ] = await Promise.all([
+      (actor.getAllPatientsSince(lastTs) as Promise<unknown[]>).catch(
+        () => null,
+      ),
+      (actor.getAllVisitsSince(lastTs) as Promise<unknown[]>).catch(() => null),
+      (actor.getAllPrescriptionsSince(lastTs) as Promise<unknown[]>).catch(
+        () => null,
+      ),
+      (
+        actor.getAppointmentsSince(doctorEmail, lastTs) as Promise<unknown>
+      ).catch(() => null),
+      (
+        actor.getQueueEntriesSince(doctorEmail, lastTs) as Promise<unknown>
+      ).catch(() => null),
+    ]);
+
+    // ── Patients ────────────────────────────────────────────────────────────
+    if (Array.isArray(remotePatients) && remotePatients.length > 0) {
+      const key = storageKey("patients");
+      const local = loadFromStorage<{ id: unknown; updatedAt?: unknown }>(key);
+      const before = local.length;
+      const merged = mergeByIdLastWriterWins(
+        local,
+        remotePatients as typeof local,
+      );
+      saveToStorage(key, merged);
+      updated += Math.abs(merged.length - before) + remotePatients.length;
+    }
+
+    // ── Visits ──────────────────────────────────────────────────────────────
+    if (Array.isArray(remoteVisits) && remoteVisits.length > 0) {
+      const key = storageKey("visits");
+      const local = loadFromStorage<{ id: unknown; updatedAt?: unknown }>(key);
+      const merged = mergeByIdLastWriterWins(
+        local,
+        remoteVisits as typeof local,
+      );
+      saveToStorage(key, merged);
+      updated += remoteVisits.length;
+    }
+
+    // ── Prescriptions ────────────────────────────────────────────────────────
+    if (Array.isArray(remotePrescriptions) && remotePrescriptions.length > 0) {
+      const key = storageKey("prescriptions");
+      const local = loadFromStorage<{ id: unknown; updatedAt?: unknown }>(key);
+      const merged = mergeByIdLastWriterWins(
+        local,
+        remotePrescriptions as typeof local,
+      );
+      saveToStorage(key, merged);
+      updated += remotePrescriptions.length;
+    }
+
+    // ── Appointments ─────────────────────────────────────────────────────────
+    const remoteAppts =
+      remoteApptsResult !== null &&
+      typeof remoteApptsResult === "object" &&
+      "__kind__" in (remoteApptsResult as object)
+        ? (remoteApptsResult as { __kind__: string; ok?: unknown[] }).ok
+        : Array.isArray(remoteApptsResult)
+          ? remoteApptsResult
+          : null;
+
+    if (Array.isArray(remoteAppts) && remoteAppts.length > 0) {
+      const local = loadFromStorage<{ id: unknown; updatedAt?: unknown }>(
+        "clinic_appointments",
+      );
+      const merged = mergeByIdLastWriterWins(
+        local,
+        remoteAppts as typeof local,
+      );
+      saveToStorage("clinic_appointments", merged);
+      updated += remoteAppts.length;
+    }
+
+    // ── Queue entries ─────────────────────────────────────────────────────────
+    const remoteQueue =
+      remoteQueueResult !== null &&
+      typeof remoteQueueResult === "object" &&
+      "__kind__" in (remoteQueueResult as object)
+        ? (remoteQueueResult as { __kind__: string; ok?: unknown[] }).ok
+        : Array.isArray(remoteQueueResult)
+          ? remoteQueueResult
+          : null;
+
+    if (Array.isArray(remoteQueue) && remoteQueue.length > 0) {
+      _mergeQueueEntries(remoteQueue as Array<Record<string, unknown>>);
+      updated += remoteQueue.length;
+    }
+
+    // ── Update timestamp only on full success ────────────────────────────────
+    try {
+      const ts = (await actor.getLastSyncTimestamp()) as bigint;
+      setLastSyncTs(ts);
+    } catch {
+      // Use current time as fallback so next poll doesn't re-pull everything
+      setLastSyncTs(BigInt(Date.now()) * 1_000_000n);
+    }
+
+    return { success: true, updated };
+  } catch (err) {
+    console.error(
+      `[sync] pollAndUpdateFromCanister error at ${new Date().toISOString()}:`,
+      err,
+    );
+    // Do NOT update LAST_SYNC_TS_KEY on failure — next poll will retry from same ts
+    return { success: false, updated: 0 };
+  }
+}
+
+/** Merge queue entries into their per-date localStorage keys */
+function _mergeQueueEntries(entries: Array<Record<string, unknown>>): void {
+  const todayDate = new Date().toISOString().slice(0, 10);
+  const byDate = new Map<string, Array<Record<string, unknown>>>();
+  for (const entry of entries) {
+    const d =
+      (entry.queueDate as string) ?? (entry.date as string) ?? todayDate;
+    if (!byDate.has(d)) byDate.set(d, []);
+    byDate.get(d)!.push(entry);
+  }
+  for (const [date, dateEntries] of byDate) {
+    const localKey = `clinic_serials_${date}`;
+    const local = (() => {
+      try {
+        return JSON.parse(localStorage.getItem(localKey) || "[]") as Array<{
+          id: unknown;
+          updatedAt?: unknown;
+        }>;
+      } catch {
+        return [];
+      }
+    })();
+    const merged = mergeByIdLastWriterWins(
+      local,
+      dateEntries as Array<{ id: unknown; updatedAt?: unknown }>,
+    );
+    localStorage.setItem(localKey, JSON.stringify(merged));
+  }
+}
+
+// ─── Flush sync queue ─────────────────────────────────────────────────────────
+
+/**
+ * Flush all pending local writes to the canister using bulk upsert calls.
+ * Groups items by type, sends bulk calls, and removes successfully synced items.
+ * NEVER silently drops items — keeps retrying until success.
+ */
+export async function flushSyncQueue(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  actor: any,
+): Promise<{ success: number; failed: number; pending: number }> {
+  if (!isNetworkOnline() || !actor) {
+    return { success: 0, failed: 0, pending: getPendingChangesCount() };
+  }
+
+  const queue = loadSyncQueue();
+  if (queue.length === 0) return { success: 0, failed: 0, pending: 0 };
+
+  // Group by type
+  const patients = queue.filter(
+    (q) => q.type === "upsertPatient" || q.entityType === "patient",
+  );
+  const visits = queue.filter(
+    (q) => q.type === "upsertVisit" || q.entityType === "visit",
+  );
+  const prescriptions = queue.filter(
+    (q) => q.type === "upsertPrescription" || q.entityType === "prescription",
+  );
+  const appointments = queue.filter(
+    (q) => q.type === "upsertAppointment" || q.entityType === "appointment",
+  );
+  const queueEntries = queue.filter(
+    (q) => q.type === "upsertQueueEntry" || q.entityType === "queueEntry",
+  );
+
+  let totalSuccess = 0;
+  let totalFailed = 0;
+  const successfulIds = new Set<string>();
+
+  // ── Bulk upsert patients ──────────────────────────────────────────────────
+  if (patients.length > 0) {
+    try {
+      const payloads = patients.map((q) => q.data);
+      await actor.bulkUpsertPatients(payloads);
+      for (const q of patients) {
+        const id =
+          q.entityId ?? String((q.data as Record<string, unknown>)?.id ?? "");
+        successfulIds.add(`upsertPatient:${id}`);
+      }
+      totalSuccess += patients.length;
+    } catch (err) {
+      console.warn("[sync] bulkUpsertPatients failed, will retry:", err);
+      totalFailed += patients.length;
+    }
+  }
+
+  // ── Bulk upsert visits ────────────────────────────────────────────────────
+  if (visits.length > 0) {
+    try {
+      const payloads = visits.map((q) => q.data);
+      await actor.bulkUpsertVisits(payloads);
+      for (const q of visits) {
+        const id =
+          q.entityId ?? String((q.data as Record<string, unknown>)?.id ?? "");
+        successfulIds.add(`upsertVisit:${id}`);
+      }
+      totalSuccess += visits.length;
+    } catch (err) {
+      console.warn("[sync] bulkUpsertVisits failed, will retry:", err);
+      totalFailed += visits.length;
+    }
+  }
+
+  // ── Bulk upsert prescriptions ─────────────────────────────────────────────
+  if (prescriptions.length > 0) {
+    try {
+      const payloads = prescriptions.map((q) => q.data);
+      await actor.bulkUpsertPrescriptions(payloads);
+      for (const q of prescriptions) {
+        const id =
+          q.entityId ?? String((q.data as Record<string, unknown>)?.id ?? "");
+        successfulIds.add(`upsertPrescription:${id}`);
+      }
+      totalSuccess += prescriptions.length;
+    } catch (err) {
+      console.warn("[sync] bulkUpsertPrescriptions failed, will retry:", err);
+      totalFailed += prescriptions.length;
+    }
+  }
+
+  // ── Bulk upsert appointments ──────────────────────────────────────────────
+  if (appointments.length > 0) {
+    try {
+      const payloads = appointments.map((q) => q.data);
+      const result = await actor.bulkUpsertAppointments(payloads);
+      if (!result || result.__kind__ !== "err") {
+        for (const q of appointments) {
+          const id =
+            q.entityId ?? String((q.data as Record<string, unknown>)?.id ?? "");
+          successfulIds.add(`upsertAppointment:${id}`);
+        }
+        totalSuccess += appointments.length;
+      } else {
+        console.warn(
+          "[sync] bulkUpsertAppointments canister error:",
+          result.err,
+        );
+        totalFailed += appointments.length;
+      }
+    } catch (err) {
+      console.warn("[sync] bulkUpsertAppointments failed, will retry:", err);
+      totalFailed += appointments.length;
+    }
+  }
+
+  // ── Bulk upsert queue entries ─────────────────────────────────────────────
+  if (queueEntries.length > 0) {
+    try {
+      const payloads = queueEntries.map((q) => q.data);
+      const result = await actor.bulkUpsertQueueEntries(payloads);
+      if (!result || result.__kind__ !== "err") {
+        for (const q of queueEntries) {
+          const id =
+            q.entityId ?? String((q.data as Record<string, unknown>)?.id ?? "");
+          successfulIds.add(`upsertQueueEntry:${id}`);
+        }
+        totalSuccess += queueEntries.length;
+      } else {
+        console.warn(
+          "[sync] bulkUpsertQueueEntries canister error:",
+          result.err,
+        );
+        totalFailed += queueEntries.length;
+      }
+    } catch (err) {
+      console.warn("[sync] bulkUpsertQueueEntries failed, will retry:", err);
+      totalFailed += queueEntries.length;
+    }
+  }
+
+  // Remove successfully synced items from the queue
+  if (successfulIds.size > 0) {
+    const remaining = queue.filter((q) => {
+      const type =
+        q.type ??
+        (q.entityType === "patient"
+          ? "upsertPatient"
+          : q.entityType === "visit"
+            ? "upsertVisit"
+            : q.entityType === "prescription"
+              ? "upsertPrescription"
+              : q.entityType === "appointment"
+                ? "upsertAppointment"
+                : "upsertQueueEntry");
+      const id =
+        q.entityId ?? String((q.data as Record<string, unknown>)?.id ?? "");
+      return !successfulIds.has(`${type}:${id}`);
+    });
+    saveSyncQueue(remaining);
+    if (totalSuccess > 0) {
+      localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
+    }
+  }
+
+  const pending = loadSyncQueue().length;
+  return { success: totalSuccess, failed: totalFailed, pending };
+}
+
+// ─── Full sync cycle ──────────────────────────────────────────────────────────
+
+/**
+ * One full sync cycle: flush writes → incremental pull.
+ * Wrapped in try/catch so a single failure never breaks the polling loop.
+ */
+export async function doSyncCycle(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  actor: any,
+  invalidateAll?: () => void,
+): Promise<void> {
+  if (!isNetworkOnline() || !actor) return;
+
+  try {
+    // 1. Flush pending writes first
+    const flushResult = await flushSyncQueue(actor);
+
+    // 2. Pull remote updates
+    const pullResult = await pollAndUpdateFromCanister(actor);
+
+    // 3. If anything changed, invalidate React Query cache
+    if (
+      (flushResult.success > 0 ||
+        pullResult.updated > 0 ||
+        pullResult.success) &&
+      invalidateAll
+    ) {
+      invalidateAll();
+    }
+
+    // 4. Record heartbeat (best-effort)
+    try {
+      const pending = BigInt(getPendingChangesCount());
+      await actor.recordDeviceSync(getDeviceId(), pending);
+    } catch {}
+  } catch (err) {
+    console.error(
+      `[sync] doSyncCycle error at ${new Date().toISOString()}:`,
+      err,
+    );
+    // Do NOT rethrow — caller's interval must continue
+  }
+}
+
+// ─── Legacy: one-time migration helper ───────────────────────────────────────
+
+/**
+ * Run one-time migration from localStorage to the canister.
+ * Kept for backward compat with existing migration flow.
+ */
+export async function runMigration(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  actor: any,
+  onProgress?: (p: MigrationProgress) => void,
+): Promise<{ migrated: number; skipped: number }> {
+  if (isMigrationDone()) {
+    return { migrated: 0, skipped: 0 };
+  }
+
+  onProgress?.({ total: 1, migrated: 0, message: "Gathering local records…" });
+
   const patients: unknown[] = [];
   const visits: unknown[] = [];
   const prescriptions: unknown[] = [];
@@ -139,14 +749,11 @@ function gatherAllLocalData(): {
     if (!key) continue;
     try {
       if (key.startsWith("patients_")) {
-        const items = loadFromStorage<unknown>(key);
-        patients.push(...items);
+        patients.push(...loadFromStorage<unknown>(key));
       } else if (key.startsWith("visits_")) {
-        const items = loadFromStorage<unknown>(key);
-        visits.push(...items);
+        visits.push(...loadFromStorage<unknown>(key));
       } else if (key.startsWith("prescriptions_")) {
-        const items = loadFromStorage<unknown>(key);
-        prescriptions.push(...items);
+        prescriptions.push(...loadFromStorage<unknown>(key));
       } else if (
         key.startsWith("appointments_") ||
         key === "medicare_appointments"
@@ -160,47 +767,7 @@ function gatherAllLocalData(): {
     } catch {}
   }
 
-  const dedup = <T extends { id: unknown }>(arr: T[]): T[] => {
-    const seen = new Set<string>();
-    return arr.filter((item) => {
-      const k = String(item.id);
-      if (seen.has(k)) return false;
-      seen.add(k);
-      return true;
-    });
-  };
-
-  return {
-    patientsJson: JSON.stringify(dedup(patients as Array<{ id: unknown }>)),
-    visitsJson: JSON.stringify(dedup(visits as Array<{ id: unknown }>)),
-    prescriptionsJson: JSON.stringify(
-      dedup(prescriptions as Array<{ id: unknown }>),
-    ),
-    appointmentsJson: JSON.stringify(appointments),
-  };
-}
-
-/**
- * Run one-time migration from localStorage to the canister.
- * Calls backend.migrateFromLocalStorage with all gathered data.
- * Marks migration done so it never runs again.
- */
-export async function runMigration(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  actor: any,
-  onProgress?: (p: MigrationProgress) => void,
-): Promise<{ migrated: number; skipped: number }> {
-  if (isMigrationDone()) {
-    return { migrated: 0, skipped: 0 };
-  }
-
-  onProgress?.({ total: 1, migrated: 0, message: "Gathering local records…" });
-
-  const data = gatherAllLocalData();
-  const totalItems =
-    JSON.parse(data.patientsJson).length +
-    JSON.parse(data.visitsJson).length +
-    JSON.parse(data.prescriptionsJson).length;
+  const totalItems = patients.length + visits.length + prescriptions.length;
 
   if (totalItems === 0) {
     markMigrationDone();
@@ -215,15 +782,15 @@ export async function runMigration(
 
   try {
     const result = await actor.migrateFromLocalStorage(
-      data.patientsJson,
-      data.visitsJson,
-      data.prescriptionsJson,
-      data.appointmentsJson,
+      JSON.stringify(patients),
+      JSON.stringify(visits),
+      JSON.stringify(prescriptions),
+      JSON.stringify(appointments),
     );
 
     if (result.__kind__ === "ok") {
       markMigrationDone();
-      localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
+      setLastSyncTs(BigInt(Date.now()) * 1_000_000n);
       onProgress?.({
         total: totalItems,
         migrated: totalItems,
@@ -232,21 +799,17 @@ export async function runMigration(
       return { migrated: totalItems, skipped: 0 };
     }
 
-    console.warn("Migration backend error:", result.err);
+    console.warn("[sync] Migration backend error:", result.err);
     return { migrated: 0, skipped: totalItems };
   } catch (err) {
-    console.warn("Migration network error:", err);
+    console.warn("[sync] Migration network error:", err);
     return { migrated: 0, skipped: totalItems };
   }
 }
 
-// ── Background sync flush ─────────────────────────────────────────────────────
+// ─── Legacy: recordSyncHeartbeat ──────────────────────────────────────────────
+// Kept for backward compat with useMigration imports.
 
-const MAX_RETRIES = 3;
-
-/**
- * Record a device sync heartbeat with the canister.
- */
 export async function recordSyncHeartbeat(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   actor: any,
@@ -259,337 +822,5 @@ export async function recordSyncHeartbeat(
   } catch {}
 }
 
-/**
- * Flush the sync queue to the canister.
- */
-export async function flushSyncQueue(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  actor: any,
-): Promise<{ success: number; failed: number }> {
-  if (!isNetworkOnline() || !actor) {
-    return { success: 0, failed: 0 };
-  }
-
-  const queue = loadSyncQueue();
-  if (queue.length === 0) return { success: 0, failed: 0 };
-
-  let success = 0;
-  let failed = 0;
-  const remaining: SyncQueueItem[] = [];
-
-  for (const item of queue) {
-    if (item.retryCount >= MAX_RETRIES) {
-      failed++;
-      continue;
-    }
-    try {
-      await dispatchSyncItem(actor, item);
-      success++;
-    } catch {
-      remaining.push({ ...item, retryCount: item.retryCount + 1 });
-      failed++;
-    }
-  }
-
-  saveSyncQueue(remaining);
-  if (success > 0) {
-    localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
-  }
-
-  return { success, failed };
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function dispatchSyncItem(
-  actor: any,
-  item: SyncQueueItem,
-): Promise<void> {
-  // Helper to safely cast data fields
-  const d = item.data as Record<string, unknown>;
-
-  switch (item.entityType) {
-    case "patient": {
-      if (item.operation === "delete") {
-        await actor.deletePatient(BigInt(item.entityId ?? "0"));
-      } else if (item.operation === "create") {
-        await actor.createPatient(
-          (d.fullName as string) ?? "",
-          (d.nameBn as string | null) ?? null,
-          d.dateOfBirth != null ? BigInt(String(d.dateOfBirth)) : null,
-          (d.gender as string) ?? "male",
-          (d.phone as string | null) ?? null,
-          (d.email as string | null) ?? null,
-          (d.address as string | null) ?? null,
-          (d.bloodGroup as string | null) ?? null,
-          d.weight != null ? Number(d.weight) : null,
-          d.height != null ? Number(d.height) : null,
-          Array.isArray(d.allergies) ? (d.allergies as string[]) : [],
-          Array.isArray(d.chronicConditions)
-            ? (d.chronicConditions as string[])
-            : [],
-          (d.pastSurgicalHistory as string | null) ?? null,
-          (d.patientType as string) ?? "outdoor",
-          null,
-          null,
-        );
-      } else if (item.operation === "update" && item.entityId) {
-        await actor.updatePatient(
-          BigInt(item.entityId),
-          (d.fullName as string) ?? "",
-          (d.nameBn as string | null) ?? null,
-          d.dateOfBirth != null ? BigInt(String(d.dateOfBirth)) : null,
-          (d.gender as string) ?? "male",
-          (d.phone as string | null) ?? null,
-          (d.email as string | null) ?? null,
-          (d.address as string | null) ?? null,
-          (d.bloodGroup as string | null) ?? null,
-          d.weight != null ? Number(d.weight) : null,
-          d.height != null ? Number(d.height) : null,
-          Array.isArray(d.allergies) ? (d.allergies as string[]) : [],
-          Array.isArray(d.chronicConditions)
-            ? (d.chronicConditions as string[])
-            : [],
-          (d.pastSurgicalHistory as string | null) ?? null,
-          (d.patientType as string) ?? "outdoor",
-          null,
-          null,
-        );
-      }
-      break;
-    }
-    case "visit": {
-      if (item.operation === "delete") {
-        await actor.deleteVisit(BigInt(item.entityId ?? "0"));
-      } else if (item.operation === "create") {
-        await actor.createVisit(
-          d.patientId != null ? BigInt(String(d.patientId)) : 0n,
-          d.visitDate != null ? BigInt(String(d.visitDate)) : 0n,
-          (d.chiefComplaint as string) ?? "",
-          (d.historyOfPresentIllness as string | null) ?? null,
-          (d.vitalSigns as object) ?? {},
-          (d.physicalExamination as string | null) ?? null,
-          (d.diagnosis as string | null) ?? null,
-          (d.notes as string | null) ?? null,
-          (d.visitType as string) ?? "outpatient",
-        );
-      } else if (item.operation === "update" && item.entityId) {
-        await actor.updateVisit(
-          BigInt(item.entityId),
-          d.patientId != null ? BigInt(String(d.patientId)) : 0n,
-          d.visitDate != null ? BigInt(String(d.visitDate)) : 0n,
-          (d.chiefComplaint as string) ?? "",
-          (d.historyOfPresentIllness as string | null) ?? null,
-          (d.vitalSigns as object) ?? {},
-          (d.physicalExamination as string | null) ?? null,
-          (d.diagnosis as string | null) ?? null,
-          (d.notes as string | null) ?? null,
-          (d.visitType as string) ?? "outpatient",
-        );
-      }
-      break;
-    }
-    case "prescription": {
-      if (item.operation === "delete") {
-        await actor.deletePrescription(BigInt(item.entityId ?? "0"));
-      } else if (item.operation === "create") {
-        await actor.createPrescription(
-          d.patientId != null ? BigInt(String(d.patientId)) : 0n,
-          d.visitId != null ? BigInt(String(d.visitId)) : null,
-          d.prescriptionDate != null
-            ? BigInt(String(d.prescriptionDate))
-            : BigInt(Date.now()) * 1_000_000n,
-          (d.diagnosis as string | null) ?? null,
-          Array.isArray(d.medications) ? d.medications : [],
-          (d.notes as string | null) ?? null,
-        );
-      } else if (item.operation === "update" && item.entityId) {
-        await actor.updatePrescription(
-          BigInt(item.entityId),
-          d.patientId != null ? BigInt(String(d.patientId)) : 0n,
-          d.visitId != null ? BigInt(String(d.visitId)) : null,
-          d.prescriptionDate != null
-            ? BigInt(String(d.prescriptionDate))
-            : BigInt(Date.now()) * 1_000_000n,
-          (d.diagnosis as string | null) ?? null,
-          Array.isArray(d.medications) ? d.medications : [],
-          (d.notes as string | null) ?? null,
-        );
-      }
-      break;
-    }
-    case "appointment": {
-      // Use bulk upsert for both create and update — it is idempotent
-      if (item.operation === "delete" && item.entityId) {
-        await actor.deleteAppointment(item.entityId);
-      } else {
-        await actor.bulkUpsertAppointments([d]);
-      }
-      break;
-    }
-    case "queueEntry": {
-      if (item.operation === "delete" && item.entityId) {
-        await actor.deleteQueueEntry(item.entityId);
-      } else {
-        await actor.bulkUpsertQueueEntries([d]);
-      }
-      break;
-    }
-    default:
-      break;
-  }
-}
-
-// ── Poll canister for remote updates ─────────────────────────────────────────
-// This is the CRITICAL function for cross-device sync.
-// It fetches the latest data from the canister and merges it into localStorage,
-// so both devices always see the same source of truth.
-
-/**
- * Pull all patients, visits, prescriptions, appointments, and queue entries
- * from the canister and write them into localStorage as the offline cache.
- * This runs every 15s and on every network reconnect.
- *
- * Returns true if any data was updated (useful for triggering cache invalidation).
- */
-export async function pollAndUpdateFromCanister(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  actor: any,
-): Promise<boolean> {
-  if (!isNetworkOnline() || !actor) return false;
-
-  let updated = false;
-
-  try {
-    // ── Pull patients ────────────────────────────────────────────────────────
-    const remotePatients = await actor.getAllPatients();
-    if (Array.isArray(remotePatients) && remotePatients.length > 0) {
-      // Merge remote into the current doctor's localStorage key
-      const key = storageKey("patients");
-      const local = loadFromStorage<{ id: unknown }>(key);
-      const localIds = new Set(local.map((p) => String(p.id)));
-      const toAdd = remotePatients.filter(
-        (p: { id: unknown }) => !localIds.has(String(p.id)),
-      );
-      if (toAdd.length > 0) {
-        saveToStorage(key, [...local, ...toAdd]);
-        updated = true;
-      }
-      // Also update existing records from remote (canister is authoritative)
-      const merged = mergeByIdPreferRemote(local, remotePatients);
-      if (JSON.stringify(merged) !== JSON.stringify(local)) {
-        saveToStorage(key, merged);
-        updated = true;
-      }
-    }
-  } catch {
-    // Silent fail — offline fallback stays intact
-  }
-
-  try {
-    // ── Pull visits ──────────────────────────────────────────────────────────
-    const remoteVisits = await actor.getAllVisits();
-    if (Array.isArray(remoteVisits) && remoteVisits.length > 0) {
-      const key = storageKey("visits");
-      const local = loadFromStorage<{ id: unknown }>(key);
-      const merged = mergeByIdPreferRemote(local, remoteVisits);
-      if (JSON.stringify(merged) !== JSON.stringify(local)) {
-        saveToStorage(key, merged);
-        updated = true;
-      }
-    }
-  } catch {}
-
-  try {
-    // ── Pull prescriptions ───────────────────────────────────────────────────
-    const remotePrescriptions = await actor.getAllPrescriptions();
-    if (Array.isArray(remotePrescriptions) && remotePrescriptions.length > 0) {
-      const key = storageKey("prescriptions");
-      const local = loadFromStorage<{ id: unknown }>(key);
-      const merged = mergeByIdPreferRemote(local, remotePrescriptions);
-      if (JSON.stringify(merged) !== JSON.stringify(local)) {
-        saveToStorage(key, merged);
-        updated = true;
-      }
-    }
-  } catch {}
-
-  try {
-    // ── Pull appointments ────────────────────────────────────────────────────
-    // Use a timestamp 30 days back so we always get a useful window of data.
-    // The canister returns all appointments updated since that timestamp.
-    const sinceMs = BigInt(Date.now() - 30 * 24 * 60 * 60 * 1000) * 1_000_000n;
-    const remoteAppointments = await actor.getAppointmentsSince(sinceMs);
-    if (Array.isArray(remoteAppointments) && remoteAppointments.length > 0) {
-      const local = loadFromStorage<{ id: unknown }>("clinic_appointments");
-      const merged = mergeByIdPreferRemote(local, remoteAppointments);
-      if (JSON.stringify(merged) !== JSON.stringify(local)) {
-        localStorage.setItem("clinic_appointments", JSON.stringify(merged));
-        updated = true;
-      }
-    }
-  } catch {}
-
-  try {
-    // ── Pull today's serial queue entries ────────────────────────────────────
-    const todayDate = new Date().toISOString().slice(0, 10);
-    const sinceMs = BigInt(Date.now() - 2 * 24 * 60 * 60 * 1000) * 1_000_000n;
-    const remoteQueue = await actor.getQueueEntriesSince(sinceMs);
-    if (Array.isArray(remoteQueue) && remoteQueue.length > 0) {
-      // Group by date and merge each date key separately
-      const byDate = new Map<string, unknown[]>();
-      for (const entry of remoteQueue) {
-        const d = (entry as Record<string, string>).queueDate ?? todayDate;
-        if (!byDate.has(d)) byDate.set(d, []);
-        byDate.get(d)!.push(entry);
-      }
-      for (const [date, entries] of byDate) {
-        const localKey = `clinic_serials_${date}`;
-        const local = (() => {
-          try {
-            return JSON.parse(localStorage.getItem(localKey) || "[]") as {
-              id: unknown;
-            }[];
-          } catch {
-            return [];
-          }
-        })();
-        const merged = mergeByIdPreferRemote(
-          local,
-          entries as { id: unknown }[],
-        );
-        if (JSON.stringify(merged) !== JSON.stringify(local)) {
-          localStorage.setItem(localKey, JSON.stringify(merged));
-          if (date === todayDate) updated = true;
-        }
-      }
-    }
-  } catch {}
-
-  if (updated) {
-    localStorage.setItem(LAST_SYNC_KEY, new Date().toISOString());
-  }
-
-  return updated;
-}
-
-/** Merge two arrays by id, with remote taking precedence for matching ids */
-function mergeByIdPreferRemote<T extends { id: unknown }>(
-  local: T[],
-  remote: T[],
-): T[] {
-  const remoteMap = new Map<string, T>();
-  for (const item of remote) {
-    remoteMap.set(String(item.id), item);
-  }
-  // Start with local, overwrite if remote has updated version
-  const result: T[] = local.map((item) => {
-    const remoteItem = remoteMap.get(String(item.id));
-    return remoteItem ?? item;
-  });
-  // Add items that exist remotely but not locally
-  for (const item of remote) {
-    const exists = result.some((r) => String(r.id) === String(item.id));
-    if (!exists) result.push(item);
-  }
-  return result;
-}
+// Re-export removeFromQueue for use in useQueries.ts write path
+export { removeFromQueue };

@@ -1,18 +1,18 @@
 // ─── Migration & Sync Hook ────────────────────────────────────────────────────
 // Handles one-time transparent migration from localStorage → canister.
 // Also drives the 15-second polling loop that keeps all devices in sync:
-//   1. Flush pending local writes → canister
-//   2. Pull remote updates from canister → localStorage
-//   3. Invalidate React Query cache so both devices show fresh data
+//   1. On first actor load: bootstrap full hydration from canister
+//   2. Every 15s: flush pending writes → pull incremental updates
+//   3. On tab focus / online: immediate sync cycle
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   type MigrationProgress,
-  flushSyncQueue,
+  bootstrapFromCanister,
+  doSyncCycle,
   isMigrationDone,
   isNetworkOnline,
   markMigrationDone,
-  pollAndUpdateFromCanister,
   recordSyncHeartbeat,
   runMigration,
 } from "../lib/hybridStorage";
@@ -31,6 +31,19 @@ const DEFAULT_PROGRESS: MigrationProgress = {
   message: "",
 };
 
+// How many ms since last sync to consider it "stale" and run a full bootstrap
+const BOOTSTRAP_STALE_MS = 5 * 60 * 1000; // 5 minutes
+
+function getLastSyncAgeMs(): number {
+  try {
+    const raw = localStorage.getItem("medicare_last_sync_at");
+    if (!raw) return Number.POSITIVE_INFINITY;
+    return Date.now() - new Date(raw).getTime();
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
 // ── Hook ──────────────────────────────────────────────────────────────────────
 
 export function useMigration(
@@ -41,11 +54,13 @@ export function useMigration(
 ): MigrationState {
   const [status, setStatus] = useState<MigrationStatus>("idle");
   const [progress, setProgress] = useState<MigrationProgress>(DEFAULT_PROGRESS);
-  const hasRunRef = useRef(false);
+  const hasRunMigrationRef = useRef(false);
+  const hasBootstrappedRef = useRef(false);
   const syncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // ── One-time migration: localStorage → canister ──────────────────────────
   const doMigration = useCallback(async () => {
-    if (!actor || hasRunRef.current) return;
+    if (!actor || hasRunMigrationRef.current) return;
     if (isMigrationDone()) {
       await recordSyncHeartbeat(actor);
       return;
@@ -53,7 +68,7 @@ export function useMigration(
 
     if (!isNetworkOnline()) return;
 
-    hasRunRef.current = true;
+    hasRunMigrationRef.current = true;
     setStatus("running");
     setProgress({ total: 0, migrated: 0, message: "Preparing sync…" });
 
@@ -70,88 +85,125 @@ export function useMigration(
       }
       setStatus("complete");
     } catch (err) {
-      console.warn("Migration failed:", err);
+      console.warn("[sync] Migration failed:", err);
       setStatus("failed");
-      hasRunRef.current = false;
+      hasRunMigrationRef.current = false;
     }
   }, [actor]);
 
-  // ── Full sync cycle: flush writes + pull remote + invalidate cache ───────────
-  const doSyncCycle = useCallback(async () => {
-    if (!actor || !isNetworkOnline()) return;
+  // ── Bootstrap: full canister hydration on first actor load ───────────────
+  const doBootstrap = useCallback(async () => {
+    if (!actor || hasBootstrappedRef.current || !isNetworkOnline()) return;
+    hasBootstrappedRef.current = true;
     try {
-      // 1. Push any pending local writes to canister
-      await flushSyncQueue(actor);
-
-      // 2. Pull remote updates from canister into localStorage
-      await pollAndUpdateFromCanister(actor);
-
-      // 3. Always invalidate React Query cache so pages re-read from localStorage
-      //    (which now contains the freshest canister data from ALL devices)
-      if (invalidateAll) {
-        invalidateAll();
-      }
-
-      // 4. Record heartbeat
-      await recordSyncHeartbeat(actor);
+      await bootstrapFromCanister(actor);
+      if (invalidateAll) invalidateAll();
     } catch (err) {
-      console.warn("Sync cycle error:", err);
+      console.error("[sync] Bootstrap failed:", err);
+      hasBootstrappedRef.current = false; // allow retry
     }
   }, [actor, invalidateAll]);
 
-  // Auto-run migration on mount when actor becomes available
+  // ── Sync cycle wrapper — hardened against errors ─────────────────────────
+  const safeSyncCycle = useCallback(
+    async (reason?: string) => {
+      if (!actor) return;
+      if (reason) {
+        console.debug(`[sync] cycle triggered: ${reason}`);
+      }
+      try {
+        await doSyncCycle(actor, invalidateAll);
+      } catch (err) {
+        console.error(
+          `[sync] safeSyncCycle error at ${new Date().toISOString()}:`,
+          err,
+        );
+        // Reset interval on error to recover from broken state
+        if (syncIntervalRef.current) {
+          clearInterval(syncIntervalRef.current);
+          syncIntervalRef.current = setInterval(
+            () => void safeSyncCycle("interval-reset"),
+            15_000,
+          );
+        }
+      }
+    },
+    [actor, invalidateAll],
+  );
+
+  // ── Auto-run migration then bootstrap on first actor availability ─────────
   useEffect(() => {
     if (!actor) return;
-    doMigration();
+    void doMigration();
   }, [actor, doMigration]);
 
-  // ── Polling loop: runs every 15s ─────────────────────────────────────────────
+  // ── Bootstrap runs once after migration is settled ───────────────────────
+  useEffect(() => {
+    if (!actor) return;
+    // Small delay to let migration check settle first
+    const t = setTimeout(() => void doBootstrap(), 800);
+    return () => clearTimeout(t);
+  }, [actor, doBootstrap]);
+
+  // ── Polling loop: runs every 15s ─────────────────────────────────────────
   useEffect(() => {
     if (!actor) return;
 
-    // Run once immediately after mount (staggered 2s to let migration go first)
-    const initialTimer = setTimeout(() => doSyncCycle(), 2000);
+    // Run once after bootstrap (staggered so bootstrap has time to complete)
+    const initialTimer = setTimeout(() => void safeSyncCycle("initial"), 3000);
 
-    syncIntervalRef.current = setInterval(doSyncCycle, 15_000);
+    // Register interval
+    syncIntervalRef.current = setInterval(
+      () => void safeSyncCycle("interval"),
+      15_000,
+    );
+
     return () => {
       clearTimeout(initialTimer);
       if (syncIntervalRef.current) clearInterval(syncIntervalRef.current);
     };
-  }, [actor, doSyncCycle]);
+  }, [actor, safeSyncCycle]);
 
-  // ── On window 'online' event: immediate flush + poll ─────────────────────────
+  // ── On online event: bootstrap if stale, else sync cycle ────────────────
   useEffect(() => {
+    if (!actor) return;
     const handleOnline = () => {
       // Retry migration if not done
-      if (!isMigrationDone() && actor && !hasRunRef.current) {
-        doMigration();
+      if (!isMigrationDone() && !hasRunMigrationRef.current) {
+        void doMigration();
       }
-      // Immediately sync and invalidate so the newly-online device gets
-      // all changes made by the other device while this one was offline
-      doSyncCycle();
+      // Bootstrap if last sync is stale (> 5 min)
+      if (getLastSyncAgeMs() > BOOTSTRAP_STALE_MS) {
+        hasBootstrappedRef.current = false;
+        void doBootstrap();
+      } else {
+        void safeSyncCycle("online-event");
+      }
     };
     window.addEventListener("online", handleOnline);
     return () => window.removeEventListener("online", handleOnline);
-  }, [actor, doMigration, doSyncCycle]);
+  }, [actor, doMigration, doBootstrap, safeSyncCycle]);
 
-  // ── On window focus: trigger a sync so switching back to the tab refreshes ──
+  // ── On tab focus / visibility: immediate sync cycle ──────────────────────
   useEffect(() => {
     const handleFocus = () => {
-      doSyncCycle();
+      if (actor) void safeSyncCycle("focus");
+    };
+    const handleVisibility = () => {
+      if (!document.hidden && actor) void safeSyncCycle("visibility");
     };
     window.addEventListener("focus", handleFocus);
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) handleFocus();
-    });
+    document.addEventListener("visibilitychange", handleVisibility);
     return () => {
       window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [doSyncCycle]);
+  }, [actor, safeSyncCycle]);
 
   const runManualMigration = useCallback(() => {
     if (status === "running") return;
-    hasRunRef.current = false;
-    doMigration();
+    hasRunMigrationRef.current = false;
+    void doMigration();
   }, [status, doMigration]);
 
   return {

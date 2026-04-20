@@ -1,4 +1,4 @@
-// Version: 1.0.0
+// Version: 3.0.0
 type AlertSeverity__963005291 = {#Critical; #Info; #Warning};
 type AlertType__122072705 =
   {
@@ -113,6 +113,34 @@ type ClinicalOrder__887323512 =
     status : OrderStatus__838615098;
     versionInfo : VersionedRecord__27047174
   };
+type DailyProgressNote__515584449 =
+  {
+    activeComplaints : [Text];
+    activeDiagnoses : [Text];
+    assessmentText : Text;
+    authorId : Principal;
+    authorName : Text;
+    authorRole : StaffRole__87656655;
+    createdAt : Int;
+    drainMonitoring : ?Text;
+    encounterId : ?Nat;
+    id : Nat;
+    intakeOutput : ?Text;
+    investigations : [Text];
+    isDeleted : Bool;
+    isDraft : Bool;
+    noteDate : Text;
+    objectiveVitals : ?Text;
+    patientId : Nat;
+    planText : Text;
+    previousVersionIds : [Nat];
+    progressType : DailyProgressType__979730859;
+    subjectiveComplaints : [Text];
+    systemReview : ?Text;
+    updatedAt : Int;
+    versionInfo : VersionedRecord__27047174
+  };
+type DailyProgressType__979730859 = {#emergency; #evening; #morning};
 type Data__791452850<K, V> =
   {var count : Nat__490723111; kvs : [var ?(K, V)]};
 type DiagnosisTemplate__883104078 =
@@ -148,6 +176,43 @@ type Encounter__298641220 =
     versionInfo : VersionedRecord__27047174
   };
 type Gender__579703926 = {#female; #male; #other};
+type HandoverEntry__487905025 =
+  {
+    actionableItems : [Text];
+    bedNumber : ?Text;
+    clinicalSummary : Text;
+    consultantComment : ?Text;
+    consultantCommentAt : ?Int;
+    consultantCommentBy : ?Principal;
+    createdAt : Int;
+    currentConsultant : ?Text;
+    dayOfStay : ?Nat;
+    diagnosis : ?Text;
+    givenByName : Text;
+    givenByPrincipal : Principal;
+    givenByRole : StaffRole__87656655;
+    id : Nat;
+    missedMedications : [Text];
+    patientId : Nat;
+    patientName : Text;
+    pendingInvestigations : [Text];
+    pendingProcedures : [Text];
+    registerNumber : ?Text;
+    shift : HandoverShift__718289696;
+    shiftEndTime : Int;
+    shiftStartTime : Int;
+    status : HandoverStatus__763248425;
+    takenByName : ?Text;
+    takenByPrincipal : ?Principal;
+    takenByRole : ?StaffRole__87656655;
+    tasksPending : [Text];
+    updatedAt : Int;
+    versionInfo : VersionedRecord__27047174;
+    vitalsSummary : ?Text;
+    ward : ?Text
+  };
+type HandoverShift__718289696 = {#evening; #morning; #night};
+type HandoverStatus__763248425 = {#draft; #submitted};
 type Int__270357528 = Int__616954475;
 type Int__616954475 = Int;
 type Internal__8484328<K, V> =
@@ -194,6 +259,250 @@ type Observation__633753642 =
     value : Text;
     versionInfo : VersionedRecord__27047174
   };
+type OldAlertSeverity__935408068 = {#Critical; #Info; #Warning};
+type OldAlertType__19258128 =
+  {
+    #AKI;
+    #AllergyContraindication;
+    #CriticalLab;
+    #DrugInteraction;
+    #Hypotension;
+    #Hypoxia;
+    #Sepsis
+  };
+type OldAppointmentStatus__866405949 =
+  {#cancelled; #completed; #confirmed; #pending};
+type OldAppointmentType__934354810 = {#chamber; #hospital};
+type OldAppointment__1046667746 =
+  {
+    appointmentType : OldAppointmentType__934354810;
+    chamberName : ?Text;
+    createdAt : Int;
+    date : Text;
+    doctorEmail : Text;
+    hospitalName : ?Text;
+    id : Text;
+    notes : ?Text;
+    patientId : ?Nat;
+    patientName : Text;
+    phone : ?Text;
+    registerNumber : ?Text;
+    serialNumber : ?Nat;
+    status : OldAppointmentStatus__866405949;
+    timeSlot : ?Text;
+    updatedAt : Int
+  };
+type OldAuditEntry__810594348 =
+  {
+    afterValue : Text;
+    beforeValue : ?Text;
+    changedAt : Int;
+    changedBy : Principal;
+    changedByName : Text;
+    changedByRole : OldStaffRole__971422181;
+    entityId : Nat;
+    entityType : Text;
+    fieldName : Text;
+    id : Nat;
+    ipAddress : ?Text;
+    reason : ?Text
+  };
+type OldBedRecord__9436817 =
+  {
+    admissionDate : ?Int;
+    bedNumber : Text;
+    dischargeDate : ?Int;
+    id : Nat;
+    patientId : ?Nat;
+    patientName : ?Text;
+    status : OldBedStatus__685760797;
+    transferHistory : [OldBedTransferEntry__329805841];
+    ward : Text
+  };
+type OldBedStatus__685760797 = {#Empty; #Maintenance; #Occupied};
+type OldBedTransferEntry__329805841 =
+  {date : Int; fromBed : Text; reason : Text; toBed : Text};
+type OldClinicalAlert__641462877 =
+  {
+    acknowledgedAt : ?Int;
+    acknowledgedBy : ?Principal;
+    alertType : OldAlertType__19258128;
+    details : ?Text;
+    id : Nat;
+    isAcknowledged : Bool;
+    isResolved : Bool;
+    message : Text;
+    patientId : Nat;
+    resolvedAt : ?Int;
+    severity : OldAlertSeverity__935408068;
+    triggeredAt : Int;
+    triggeredBy : Text
+  };
+type OldClinicalNote__353487116 =
+  {
+    authorId : Principal;
+    authorName : Text;
+    authorRole : OldStaffRole__971422181;
+    content : Text;
+    createdAt : Int;
+    encounterId : ?Nat;
+    id : Nat;
+    isDeleted : Bool;
+    isDraft : Bool;
+    noteSubtype : ?Text;
+    noteType : OldNoteType__1057099957;
+    patientId : Nat;
+    previousVersionIds : [Nat];
+    versionInfo : OldVersionedRecord__139858455
+  };
+type OldClinicalOrder__624509786 =
+  {
+    code : Text;
+    completedAt : ?Int;
+    description : Text;
+    encounterId : ?Nat;
+    id : Nat;
+    notes : ?Text;
+    orderType : OldOrderType__400658334;
+    orderedAt : Int;
+    orderedBy : Principal;
+    orderedByName : Text;
+    orderedByRole : OldStaffRole__971422181;
+    patientId : Nat;
+    result : ?Text;
+    status : OldOrderStatus__13175761;
+    versionInfo : OldVersionedRecord__139858455
+  };
+type OldDiagnosisTemplate__1061444232 =
+  {
+    createdAt : Int;
+    createdBy : Principal;
+    defaultAdvice : [Text];
+    defaultAdviceBn : [Text];
+    defaultDrugs : [Text];
+    defaultInvestigations : [Text];
+    diagnosisName : Text;
+    diagnosisNameBn : ?Text;
+    icdCode : ?Text;
+    id : Nat;
+    isActive : Bool
+  };
+type OldEncounterStatus__658566489 =
+  {#Cancelled; #Completed; #InProgress; #Planned};
+type OldEncounterType__872249115 = {#Emergency; #FollowUp; #IPD; #OPD};
+type OldEncounter__453588358 =
+  {
+    encounterId : Text;
+    encounterType : OldEncounterType__872249115;
+    endDate : ?Int;
+    id : Nat;
+    locationNotes : ?Text;
+    patientId : Nat;
+    previousVersions : [OldVersionedRecord__139858455];
+    providerId : Principal;
+    providerName : Text;
+    startDate : Int;
+    status : OldEncounterStatus__658566489;
+    versionInfo : OldVersionedRecord__139858455
+  };
+type OldEngineState__372740612 =
+  {
+    var alertIdCounter : Nat;
+    alerts : Map__605269027<Nat, OldClinicalAlert__641462877>;
+    appointments : Map__605269027<Text, OldAppointment__1046667746>;
+    auditEntries : Map__605269027<Nat, OldAuditEntry__810594348>;
+    var auditIdCounter : Nat;
+    var bedIdCounter : Nat;
+    beds : Map__605269027<Nat, OldBedRecord__9436817>;
+    var diagnosisTemplateIdCounter : Nat;
+    diagnosisTemplates :
+      Map__605269027<Nat, OldDiagnosisTemplate__1061444232>;
+    var encounterIdCounter : Nat;
+    encounters : Map__605269027<Nat, OldEncounter__453588358>;
+    var noteIdCounter : Nat;
+    notes : Map__605269027<Nat, OldClinicalNote__353487116>;
+    var observationIdCounter : Nat;
+    observations : Map__605269027<Nat, OldObservation__885761829>;
+    var orderIdCounter : Nat;
+    orders : Map__605269027<Nat, OldClinicalOrder__624509786>;
+    queueEntries : Map__605269027<Text, OldSerialQueueEntry__985154215>;
+    var syncRecordIdCounter : Nat;
+    syncRecords : Map__605269027<Text, OldSyncRecord__196818008>
+  };
+type OldNoteType__1057099957 =
+  {#DailyProgress; #Discharge; #General; #Handover; #Nursing; #SOAP};
+type OldObservationStatus__339526602 = {#Corrected; #Final; #Preliminary};
+type OldObservationType__813573387 =
+  {#DrainMonitoring; #ExamFinding; #IntakeOutput; #Lab; #Vital};
+type OldObservation__885761829 =
+  {
+    code : Text;
+    encounterId : ?Nat;
+    id : Nat;
+    interpretation : ?Text;
+    isDeleted : Bool;
+    normalRange : ?Text;
+    numericValue : ?Float;
+    observationDate : Int;
+    observationType : OldObservationType__813573387;
+    patientId : Nat;
+    recordedBy : Principal;
+    recordedByName : Text;
+    recordedByRole : OldStaffRole__971422181;
+    status : OldObservationStatus__339526602;
+    unit : Text;
+    value : Text;
+    versionInfo : OldVersionedRecord__139858455
+  };
+type OldOrderStatus__13175761 =
+  {#Cancelled; #Completed; #InProgress; #Pending; #Requested};
+type OldOrderType__400658334 =
+  {#Investigation; #LabTest; #Medication; #Procedure};
+type OldQueueStatus__1031422545 = {#done; #serving; #skipped; #waiting};
+type OldSerialQueueEntry__985154215 =
+  {
+    calledAt : ?Int;
+    createdAt : Int;
+    date : Text;
+    doctorEmail : Text;
+    id : Text;
+    patientName : Text;
+    phone : ?Text;
+    registerNumber : ?Text;
+    serialNumber : Nat;
+    status : OldQueueStatus__1031422545;
+    updatedAt : Int
+  };
+type OldStaffRole__971422181 =
+  {
+    #admin;
+    #consultant_doctor;
+    #doctor;
+    #intern_doctor;
+    #medical_officer;
+    #nurse;
+    #patient;
+    #staff
+  };
+type OldSyncRecord__196818008 =
+  {
+    deviceId : Text;
+    id : Nat;
+    lastEntityId : ?Nat;
+    lastEntityType : ?Text;
+    lastSyncAt : Int;
+    pendingChanges : Nat;
+    userId : Principal
+  };
+type OldVersionedRecord__139858455 =
+  {
+    changeReason : ?Text;
+    createdAt : Int;
+    createdBy : Principal;
+    createdByName : Text;
+    createdByRole : OldStaffRole__971422181;
+    version : Nat
+  };
 type OrderStatus__838615098 =
   {#Cancelled; #Completed; #InProgress; #Pending; #Requested};
 type OrderType__605123120 =
@@ -218,6 +527,7 @@ type Patient__823362798 =
     pastSurgicalHistory : ?Text;
     patientType : PatientType__384173924;
     phone : ?Text;
+    updatedAt : Time__900049286;
     weight : ?Float
   };
 type Prescription__847157722 =
@@ -229,6 +539,7 @@ type Prescription__847157722 =
     notes : ?Text;
     patientId : Nat;
     prescriptionDate : Time__900049286;
+    updatedAt : Time__900049286;
     visitId : ?Nat
   };
 type QueueStatus__1020443397 = {#done; #serving; #skipped; #waiting};
@@ -243,7 +554,8 @@ type SerialQueueEntry__257017409 =
     phone : ?Text;
     registerNumber : ?Text;
     serialNumber : Nat;
-    status : QueueStatus__1020443397
+    status : QueueStatus__1020443397;
+    updatedAt : Int
   };
 type StaffRole__87656655 =
   {
@@ -290,6 +602,7 @@ type Visit__635288371 =
     notes : ?Text;
     patientId : Nat;
     physicalExamination : ?Text;
+    updatedAt : Time__900049286;
     visitDate : Time__900049286;
     visitType : VisitType__1071834702;
     vitalSigns : VitalSigns__681997343
@@ -302,7 +615,37 @@ type VitalSigns__681997343 =
     respiratoryRate : ?Text;
     temperature : ?Text
   };
-actor {
+actor ({
+  stable accessControlState :
+    {
+      var adminAssigned : Bool;
+      userRoles : Map__605269027<Principal, UserRole__587919431>
+    };
+  in clinicalEngineState : OldEngineState__372740612;
+  stable var patientIdCounter : Nat;
+  stable patients :
+    {
+      var root : Node__46230540<Nat, Patient__823362798>;
+      var size : Nat__490723111
+    };
+  stable var prescriptionIdCounter : Nat;
+  stable prescriptions :
+    {
+      var root : Node__46230540<Nat, Prescription__847157722>;
+      var size : Nat__490723111
+    };
+  stable userProfiles :
+    {
+      var root : Node__46230540<Principal, UserProfile__491224006>;
+      var size : Nat__490723111
+    };
+  stable var visitIdCounter : Nat;
+  stable visits :
+    {
+      var root : Node__46230540<Nat, Visit__635288371>;
+      var size : Nat__490723111
+    }
+}, {
   stable accessControlState :
     {
       var adminAssigned : Bool;
@@ -317,10 +660,14 @@ actor {
       var auditIdCounter : Nat;
       var bedIdCounter : Nat;
       beds : Map__605269027<Nat, BedRecord__90428469>;
+      var dailyProgressNoteIdCounter : Nat;
+      dailyProgressNotes : Map__605269027<Nat, DailyProgressNote__515584449>;
       var diagnosisTemplateIdCounter : Nat;
       diagnosisTemplates : Map__605269027<Nat, DiagnosisTemplate__883104078>;
       var encounterIdCounter : Nat;
       encounters : Map__605269027<Nat, Encounter__298641220>;
+      var handoverIdCounter : Nat;
+      handovers : Map__605269027<Nat, HandoverEntry__487905025>;
       var noteIdCounter : Nat;
       notes : Map__605269027<Nat, ClinicalNote__118286836>;
       var observationIdCounter : Nat;
@@ -354,4 +701,4 @@ actor {
       var root : Node__46230540<Nat, Visit__635288371>;
       var size : Nat__490723111
     }
-};
+}) ;

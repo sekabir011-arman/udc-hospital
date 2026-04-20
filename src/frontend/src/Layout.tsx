@@ -102,10 +102,10 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
 
   const navigation = [
     ...baseNavigation,
-    ...(canWardRound ? [wardRoundNavItem] : []),
     ...(canBedManagement ? [bedManagementNavItem] : []),
     { name: "Settings", href: "/Settings", icon: UserCircle },
     ...(isAdmin ? [adminNavItem] : []),
+    ...(canWardRound ? [wardRoundNavItem] : []),
   ];
 
   // Count meds due in the next hour for nurse/intern
