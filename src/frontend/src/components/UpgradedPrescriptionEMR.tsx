@@ -25,6 +25,7 @@ import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  AlertTriangle,
   Building2,
   Calculator,
   CalendarDays,
@@ -41,6 +42,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  ShieldAlert,
   Sparkles,
   Sun,
   Trash2,
@@ -59,7 +61,11 @@ import {
   savePrescriptionRecords,
   setPrescriptionHeaderImage,
 } from "../hooks/useQueries";
-import type { Medication } from "../types";
+import type {
+  AllergyOverrideRecord,
+  FamilyHistoryRisk,
+  Medication,
+} from "../types";
 import type { PrescriptionHeaderType } from "../types";
 import {
   type AdviceTemplate,
@@ -69,6 +75,10 @@ import {
 } from "./AdviceTemplates";
 import { getDimsByDiagnosis, searchDims } from "./DimsData";
 import { loadTrackedInvestigations } from "./InvestigationTracker";
+import {
+  DiscontinuationDialog,
+  type DiscontinuationReason,
+} from "./PrescriptionEnhancements";
 import PrescriptionHeaderPanel from "./PrescriptionHeaderPanel";
 import {
   clearDoctorSignature,
@@ -84,6 +94,11 @@ import {
   type TreatmentTemplate,
   searchTreatmentTemplates,
 } from "./TreatmentTemplates";
+import {
+  loadAllergyOverrides,
+  loadFamilyHistoryRisk,
+  saveAllergyOverrides,
+} from "./patientDashboardTypes";
 // ─── Error Boundary ────────────────────────────────────────────────────────────
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -144,6 +159,8 @@ interface UpgradedPrescriptionEMRProps {
   visitExtendedData?: Record<string, unknown>;
   patientRegisterNumber?: string;
   forceVisitData?: boolean;
+  /** Known patient allergies from Patient.allergies */
+  patientAllergies?: string[];
   /** Whether this patient is currently admitted (inpatient) */
   isAdmitted?: boolean;
   /** Hospital name for admitted patients */
@@ -181,6 +198,14 @@ interface RxDrug {
   isPrn?: boolean;
   /** Condition for PRN: e.g. "if fever > 38°C" */
   prnCondition?: string;
+  /** How drug was dispensed: brand / generic / substituted */
+  dispensedAs?: "brand" | "generic" | "substituted";
+  /** Substituted brand name (when dispensedAs = 'substituted') */
+  substitutedBrand?: string;
+  /** Discontinuation reason (set when drug is removed from active prescription) */
+  discontinuationReason?: string;
+  /** Unix timestamp when drug was discontinued */
+  discontinuedAt?: number;
 }
 
 const DRUG_FORMS = ["Tab.", "Cap.", "Syp.", "Inj.", "Inf.", "Supp.", ""];
@@ -255,6 +280,53 @@ function drugFromTreatmentDrug(td: TreatmentDrug): RxDrug {
     specialInstruction: "",
     specialInstructionBn: "",
   };
+}
+
+// ─── Allergy helper ───────────────────────────────────────────────────────────
+
+/** Merge allergies from Patient.allergies and visit historyAllergy/allergyHistory fields */
+export function getAllergiesForPatient(
+  patientAllergies: string[],
+  visitExtendedData?: Record<string, unknown>,
+): string[] {
+  const set = new Set<string>();
+  for (const a of patientAllergies) {
+    if (a.trim()) set.add(a.trim().toLowerCase());
+  }
+  if (visitExtendedData) {
+    const hist = visitExtendedData.historyAllergy as string | undefined;
+    const histArr = visitExtendedData.allergyHistory as string[] | undefined;
+    if (hist) {
+      for (const s of hist
+        .split(/[,;/\n]/)
+        .map((x) => x.trim())
+        .filter(Boolean)) {
+        set.add(s.toLowerCase());
+      }
+    }
+    if (Array.isArray(histArr)) {
+      for (const s of histArr.filter(Boolean)) {
+        set.add(s.trim().toLowerCase());
+      }
+    }
+  }
+  return Array.from(set);
+}
+
+/** Check if a drug name matches any known allergy — returns the matched allergen or null */
+export function checkDrugAllergyMatch(
+  drugName: string,
+  allergies: string[],
+): string | null {
+  if (!drugName || allergies.length === 0) return null;
+  const normalized = drugName.trim().toLowerCase();
+  for (const allergy of allergies) {
+    if (!allergy) continue;
+    if (normalized.includes(allergy) || allergy.includes(normalized)) {
+      return allergy;
+    }
+  }
+  return null;
 }
 
 // ─── Visit data helpers ────────────────────────────────────────────────────────
@@ -585,6 +657,7 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
     visitExtendedData,
     patientRegisterNumber,
     forceVisitData,
+    patientAllergies,
     isAdmitted: _isAdmitted,
     hospitalName: _hospitalName,
     onSubmit,
@@ -601,6 +674,21 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
     userRole === "doctor";
 
   const DRAFT_KEY = `medicare_rx_draft_${patientId}`;
+
+  // ── Allergy alert state ──────────────────────────────────────────────────────
+  const [allergyAlert, setAllergyAlert] = useState<{
+    drugId: string;
+    drugName: string;
+    allergen: string;
+  } | null>(null);
+  const [showOverrideForm, setShowOverrideForm] = useState(false);
+  const [overrideJustification, setOverrideJustification] = useState("");
+
+  // Computed unified allergy list
+  const unifiedAllergies = getAllergiesForPatient(
+    patientAllergies ?? [],
+    visitExtendedData,
+  );
 
   const [dark, setDark] = useState(false);
   // Header type: auto-select based on patient admission status
@@ -692,6 +780,14 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
   // PRN (as-needed) state
   const [drugIsPrn, setDrugIsPrn] = useState(false);
   const [drugPrnCondition, setDrugPrnCondition] = useState("");
+  // Dispensed As
+  const [drugDispensedAs, setDrugDispensedAs] = useState<
+    "" | "brand" | "generic" | "substituted"
+  >("");
+  const [drugSubstitutedBrand, setDrugSubstitutedBrand] = useState("");
+  // Discontinuation reason dialog
+  const [discDialogDrugId, setDiscDialogDrugId] = useState<string | null>(null);
+  const [discDialogDrugName, setDiscDialogDrugName] = useState("");
 
   // Treatment template
   const [treatmentQuery, setTreatmentQuery] = useState("");
@@ -990,31 +1086,44 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
 
   function addDrug() {
     if (!drugName.trim()) return;
+    // Allergy check before adding
+    const matchedAllergen = checkDrugAllergyMatch(
+      drugName.trim(),
+      unifiedAllergies,
+    );
+
     // If editing existing drug, update it instead of adding new
     if (editingDrugId) {
+      const updatedDrug = {
+        drugForm,
+        route: drugRoute,
+        routeBn: ROUTES_BN.find((r) => r.en === drugRoute)?.bn || "মুখে",
+        drugName: drugName.trim(),
+        brandName: drugBrandName.trim(),
+        dose: drugDose,
+        duration: drugDuration,
+        durationBn: drugDurationBn,
+        instructions: drugInstructions,
+        instructionBn: drugInstructionBn,
+        frequency: drugFrequency,
+        frequencyBn: drugFrequencyBn,
+        specialInstruction: drugSpecialInstruction,
+        specialInstructionBn: drugSpecialInstructionBn,
+        isPrn: drugIsPrn,
+        prnCondition: drugIsPrn ? drugPrnCondition : "",
+      };
+      if (matchedAllergen) {
+        setAllergyAlert({
+          drugId: editingDrugId,
+          drugName: drugName.trim(),
+          allergen: matchedAllergen,
+        });
+        setShowOverrideForm(false);
+        setOverrideJustification("");
+      }
       setRxDrugs((prev) =>
         prev.map((d) =>
-          d.id === editingDrugId
-            ? {
-                ...d,
-                drugForm,
-                route: drugRoute,
-                routeBn: ROUTES_BN.find((r) => r.en === drugRoute)?.bn || "মুখে",
-                drugName: drugName.trim(),
-                brandName: drugBrandName.trim(),
-                dose: drugDose,
-                duration: drugDuration,
-                durationBn: drugDurationBn,
-                instructions: drugInstructions,
-                instructionBn: drugInstructionBn,
-                frequency: drugFrequency,
-                frequencyBn: drugFrequencyBn,
-                specialInstruction: drugSpecialInstruction,
-                specialInstructionBn: drugSpecialInstructionBn,
-                isPrn: drugIsPrn,
-                prnCondition: drugIsPrn ? drugPrnCondition : "",
-              }
-            : d,
+          d.id === editingDrugId ? { ...d, ...updatedDrug } : d,
         ),
       );
       setEditingDrugId(null);
@@ -1052,8 +1161,21 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
       specialInstructionBn: drugSpecialInstructionBn,
       isPrn: drugIsPrn,
       prnCondition: drugIsPrn ? drugPrnCondition : "",
+      dispensedAs: drugDispensedAs || undefined,
+      substitutedBrand:
+        drugDispensedAs === "substituted" ? drugSubstitutedBrand : undefined,
     };
     setRxDrugs((prev) => [...prev, newDrug]);
+    // Show allergy alert after adding
+    if (matchedAllergen) {
+      setAllergyAlert({
+        drugId: newDrug.id,
+        drugName: newDrug.drugName,
+        allergen: matchedAllergen,
+      });
+      setShowOverrideForm(false);
+      setOverrideJustification("");
+    }
     setDrugName("");
     setDrugBrandName("");
     setDrugDose("");
@@ -1070,7 +1192,32 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
   }
 
   function deleteDrug(id: string) {
-    setRxDrugs((prev) => prev.filter((d) => d.id !== id));
+    const drug = rxDrugs.find((d) => d.id === id);
+    if (drug) {
+      setDiscDialogDrugId(id);
+      setDiscDialogDrugName(drug.brandName || drug.drugName || "this drug");
+    } else {
+      setRxDrugs((prev) => prev.filter((d) => d.id !== id));
+    }
+  }
+
+  function confirmDeleteDrug(reason: DiscontinuationReason, _note: string) {
+    if (!discDialogDrugId) return;
+    setRxDrugs((prev) =>
+      prev
+        .map((d) =>
+          d.id === discDialogDrugId
+            ? {
+                ...d,
+                discontinuationReason: reason,
+                discontinuedAt: Date.now(),
+              }
+            : d,
+        )
+        .filter((d) => d.id !== discDialogDrugId),
+    );
+    setDiscDialogDrugId(null);
+    setDiscDialogDrugName("");
   }
 
   function updateDrug(id: string, field: keyof RxDrug, value: string) {
@@ -1115,6 +1262,52 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
         : t.text.toLowerCase().includes(adviceQuery.toLowerCase());
     return matchCat && matchQ;
   });
+
+  // ── Duration/follow-up mismatch helpers ──────────────────────────────────────
+  function parseDurationDays(durationStr: string): number {
+    if (!durationStr) return 0;
+    const s = durationStr.toLowerCase().trim();
+    if (s.includes("month")) {
+      const n = Number.parseFloat(s) || 1;
+      return n * 30;
+    }
+    if (s.includes("week")) {
+      const n = Number.parseFloat(s) || 1;
+      return n * 7;
+    }
+    const n = Number.parseFloat(s);
+    return Number.isNaN(n) ? 0 : n;
+  }
+
+  /** Max days any non-PRN drug's duration covers */
+  const maxDrugDays = rxDrugs
+    .filter((d) => !d.isPrn)
+    .reduce(
+      (max, d) =>
+        Math.max(max, parseDurationDays(d.duration || d.durationBn || "")),
+      0,
+    );
+
+  /** Days until follow-up */
+  const followUpGapDays = followUpDate
+    ? Math.round(
+        (new Date(followUpDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
+      )
+    : null;
+
+  const durationMismatchWarning =
+    followUpDate &&
+    maxDrugDays > 0 &&
+    followUpGapDays !== null &&
+    followUpGapDays > maxDrugDays
+      ? `Patient may run out of medication ${followUpGapDays - maxDrugDays} day(s) before follow-up. Consider extending the prescription duration.`
+      : null;
+
+  // ── Weight warning ─────────────────────────────────────────────────────────
+  const hasWeightWarning =
+    !patientWeight ||
+    Number.isNaN(Number.parseFloat(patientWeight)) ||
+    Number.parseFloat(patientWeight) <= 0;
 
   function handleSave() {
     const medications: Medication[] = rxDrugs.map((d) => ({
@@ -1221,8 +1414,119 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
         investigation,
         adviceNewInv,
       },
+      // ── Clinical summary snapshot — locked at finalization time ──────────────
+      ...(status === "active"
+        ? {
+            finalizedSnapshot: {
+              lockedAt: Date.now(),
+              lockedBy: currentDoctor?.email ?? getDoctorEmail(),
+              chiefComplaint: cc,
+              pastHistory: pmh,
+              onExamination: oe,
+              diagnosis:
+                diagnoses.length > 0 ? diagnoses.join(" + ") : diagnosis || "",
+              investigations: investigation
+                ? investigation.split("\n").filter(Boolean)
+                : [],
+            },
+          }
+        : {}),
     };
     savePrescriptionRecords(patientId, [...existingRecords, newRecord]);
+
+    // ── Drug History auto-update on finalization ──────────────────────────────
+    if (status === "active") {
+      try {
+        const doctorEmail = getDoctorEmail();
+        // Try to find the most recent visit's drug history key for this patient
+        const visitKeys = Object.keys(localStorage).filter(
+          (k) =>
+            k.startsWith("visit_form_data_") && k.endsWith(`_${doctorEmail}`),
+        );
+        // Look through all visits for this patient
+        const patientIdStr = patientId.toString();
+        let latestVisitKey: string | null = null;
+        let latestTs = 0;
+        for (const key of visitKeys) {
+          try {
+            const raw = localStorage.getItem(key);
+            if (!raw) continue;
+            const parsed = JSON.parse(raw) as Record<string, unknown>;
+            if (
+              String(parsed.patientId ?? "") === patientIdStr ||
+              key.includes(patientIdStr)
+            ) {
+              // Use key ordering — latest numeric id is largest
+              const parts = key.split("_");
+              const idPart = Number(parts[3] ?? "0");
+              if (!Number.isNaN(idPart) && idPart > latestTs) {
+                latestTs = idPart;
+                latestVisitKey = key;
+              }
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+        // Also check using visitId if provided
+        if (visitId) {
+          const directKey = `visit_form_data_${visitId}_${doctorEmail}`;
+          if (localStorage.getItem(directKey)) latestVisitKey = directKey;
+        }
+        if (latestVisitKey) {
+          const raw = localStorage.getItem(latestVisitKey);
+          if (raw) {
+            const visitData = JSON.parse(raw) as Record<string, unknown>;
+            const currentDrugNames = new Set(
+              rxDrugs.map((d) => d.drugName.trim().toLowerCase()),
+            );
+            // Mark old drugs as Previous if not in new prescription
+            const existingDrugHistory =
+              (visitData.drugHistory as Array<{
+                name: string;
+                dose?: string;
+                duration?: string;
+                status?: string;
+                markedPreviousAt?: number;
+                updatedAt?: number;
+              }>) || [];
+            const updated = existingDrugHistory.map((entry) => {
+              if (!currentDrugNames.has((entry.name ?? "").toLowerCase())) {
+                return {
+                  ...entry,
+                  status: "Previous",
+                  markedPreviousAt: Date.now(),
+                };
+              }
+              return entry;
+            });
+            // Add/update current prescription drugs
+            for (const drug of rxDrugs) {
+              const existing = updated.find(
+                (e) => e.name.toLowerCase() === drug.drugName.toLowerCase(),
+              );
+              if (existing) {
+                existing.status = "Current";
+                existing.updatedAt = Date.now();
+              } else {
+                updated.push({
+                  name: drug.drugName,
+                  dose: drug.dose,
+                  duration: drug.duration,
+                  status: "Current",
+                  updatedAt: Date.now(),
+                });
+              }
+            }
+            visitData.drugHistory = updated;
+            localStorage.setItem(latestVisitKey, JSON.stringify(visitData));
+          }
+        }
+      } catch {
+        /* ignore drug history update errors */
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
 
     // Save full snapshot for exact preview reconstruction
     const snapshotKey = "medicare_rx_snapshots";
@@ -1752,7 +2056,48 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
             userRole === "doctor"
           }
         />
+        {/* Weight/Height warning */}
+        {hasWeightWarning && (
+          <div
+            className="mt-2 flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 border border-amber-300 text-xs text-amber-800"
+            data-ocid="rx.weight_warning.panel"
+          >
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-600 flex-shrink-0" />
+            <span>
+              ⚠ No recent weight recorded — verify dose, especially for
+              weight-based dosing
+            </span>
+          </div>
+        )}
+        {!hasWeightWarning && patientWeight && (
+          <div className="mt-1.5 text-xs text-gray-500 px-1">
+            Last recorded: Weight{" "}
+            <span className="font-semibold text-gray-700">
+              {patientWeight} kg
+            </span>
+            {patientHeight && (
+              <>
+                {" "}
+                / Height{" "}
+                <span className="font-semibold text-gray-700">
+                  {patientHeight} cm
+                </span>
+              </>
+            )}
+          </div>
+        )}
       </div>
+
+      {/* Discontinuation reason dialog */}
+      <DiscontinuationDialog
+        drugName={discDialogDrugName}
+        open={discDialogDrugId !== null}
+        onConfirm={confirmDeleteDrug}
+        onCancel={() => {
+          setDiscDialogDrugId(null);
+          setDiscDialogDrugName("");
+        }}
+      />
 
       {/* MAIN CONTENT */}
       <div className="flex flex-1 overflow-hidden">
@@ -2088,6 +2433,165 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
                   {rxDrugs.length} drug(s)
                 </span>
               </div>
+              {/* Duration mismatch warning */}
+              {durationMismatchWarning && (
+                <div
+                  className="flex items-start gap-2 mb-2 px-3 py-2 rounded-lg bg-yellow-50 border border-yellow-300 text-xs text-yellow-800"
+                  data-ocid="rx.duration_mismatch.panel"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                  <span>{durationMismatchWarning}</span>
+                </div>
+              )}
+
+              {/* ALLERGY ALERT BANNER */}
+              {allergyAlert && (
+                <div
+                  className="mb-3 rounded-lg border-2 border-red-400 bg-red-50 p-3"
+                  data-ocid="rx.allergy_alert"
+                >
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-red-800">
+                        ⚠ Allergy Alert: {patientName || "Patient"} is allergic
+                        to{" "}
+                        <strong className="capitalize">
+                          {allergyAlert.allergen}
+                        </strong>
+                        . Adding <strong>{allergyAlert.drugName}</strong> may
+                        cause a reaction.
+                      </p>
+                      {showOverrideForm ? (
+                        <div className="mt-2 space-y-2">
+                          <Label className="text-xs font-semibold text-red-700">
+                            Clinical Justification (required)
+                          </Label>
+                          <Textarea
+                            value={overrideJustification}
+                            onChange={(e) =>
+                              setOverrideJustification(e.target.value)
+                            }
+                            rows={2}
+                            placeholder="e.g. Previous cross-reactivity ruled out, benefit outweighs risk..."
+                            className="text-sm border-red-300 focus:ring-red-400"
+                            data-ocid="rx.allergy_override.textarea"
+                          />
+                          <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                const aid = allergyAlert.drugId;
+                                setAllergyAlert(null);
+                                setShowOverrideForm(false);
+                                setOverrideJustification("");
+                                setRxDrugs((prev) =>
+                                  prev.filter((d) => d.id !== aid),
+                                );
+                              }}
+                              className="text-xs border-red-300 text-red-700"
+                              data-ocid="rx.allergy_remove.button"
+                            >
+                              Remove Drug
+                            </Button>
+                            <Button
+                              size="sm"
+                              disabled={!overrideJustification.trim()}
+                              onClick={() => {
+                                if (!overrideJustification.trim()) return;
+                                const doctorEmail = getDoctorEmail();
+                                const snapId = `rx_override_${patientId}_${Date.now()}`;
+                                const override: AllergyOverrideRecord = {
+                                  drugName: allergyAlert.drugName,
+                                  overriddenBy: doctorEmail,
+                                  overriddenAt: Date.now(),
+                                  justification: overrideJustification.trim(),
+                                  prescriptionId: snapId,
+                                };
+                                const existing = loadAllergyOverrides(
+                                  doctorEmail,
+                                  patientId.toString(),
+                                );
+                                saveAllergyOverrides(
+                                  doctorEmail,
+                                  patientId.toString(),
+                                  [...existing, override],
+                                );
+                                try {
+                                  const auditKey = "medicare_audit_overrides";
+                                  const audits = JSON.parse(
+                                    localStorage.getItem(auditKey) || "[]",
+                                  ) as unknown[];
+                                  audits.push({
+                                    type: "AllergyOverride",
+                                    doctorName:
+                                      currentDoctor?.name ?? doctorEmail,
+                                    drugName: allergyAlert.drugName,
+                                    patientName:
+                                      patientName ?? patientId.toString(),
+                                    allergen: allergyAlert.allergen,
+                                    justification: overrideJustification.trim(),
+                                    timestamp: new Date().toISOString(),
+                                  });
+                                  localStorage.setItem(
+                                    auditKey,
+                                    JSON.stringify(audits),
+                                  );
+                                } catch {
+                                  /* ignore */
+                                }
+                                toast.warning(
+                                  `Allergy override recorded for ${allergyAlert.drugName}`,
+                                  {
+                                    description:
+                                      "Justification saved to audit log.",
+                                  },
+                                );
+                                setAllergyAlert(null);
+                                setShowOverrideForm(false);
+                                setOverrideJustification("");
+                              }}
+                              className="text-xs bg-red-600 hover:bg-red-700 text-white"
+                              data-ocid="rx.allergy_override_confirm.button"
+                            >
+                              Override — I acknowledge this allergy
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex gap-2 mt-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              const aid = allergyAlert.drugId;
+                              setAllergyAlert(null);
+                              setRxDrugs((prev) =>
+                                prev.filter((d) => d.id !== aid),
+                              );
+                            }}
+                            className="text-xs border-red-300 text-red-700"
+                            data-ocid="rx.allergy_remove.button"
+                          >
+                            Remove Drug
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setShowOverrideForm(true)}
+                            className="text-xs border-amber-400 text-amber-700"
+                            data-ocid="rx.allergy_override.button"
+                          >
+                            Override — I acknowledge this allergy
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {rxDrugs.length === 0 ? (
                 <p
                   className="text-sm text-muted-foreground italic py-3 text-center"
@@ -2114,6 +2618,7 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
                           "Duration",
                           "Instructions",
                           "Special Instr.",
+                          "Dispensed As",
                           "",
                         ].map((h) => (
                           <th
@@ -2457,6 +2962,48 @@ function UpgradedPrescriptionEMRInner(props: UpgradedPrescriptionEMRProps) {
                     data-ocid="rx.drug_special_instruction.input"
                   />
                 </div>
+              </div>
+
+              {/* Dispensed As row */}
+              <div className="flex items-center gap-3 mb-2 flex-wrap">
+                <div>
+                  <span className="text-sm text-muted-foreground">
+                    Dispensed As
+                  </span>
+                  <select
+                    className={`ml-2 border rounded px-2 py-1 text-sm ${dark ? "bg-gray-800 border-gray-600 text-white" : "bg-white border-gray-300"}`}
+                    value={drugDispensedAs}
+                    onChange={(e) =>
+                      setDrugDispensedAs(
+                        e.target.value as
+                          | ""
+                          | "brand"
+                          | "generic"
+                          | "substituted",
+                      )
+                    }
+                    data-ocid="rx.drug_dispensed_as.select"
+                  >
+                    <option value="">-- Optional --</option>
+                    <option value="brand">Brand</option>
+                    <option value="generic">Generic</option>
+                    <option value="substituted">Substituted</option>
+                  </select>
+                </div>
+                {drugDispensedAs === "substituted" && (
+                  <div>
+                    <span className="text-sm text-muted-foreground">
+                      Substituted Brand
+                    </span>
+                    <input
+                      className={`ml-2 border rounded px-2 py-1 text-sm ${dark ? "bg-gray-800 border-gray-600 text-white" : "bg-white border-gray-300"}`}
+                      value={drugSubstitutedBrand}
+                      onChange={(e) => setDrugSubstitutedBrand(e.target.value)}
+                      placeholder="Brand name..."
+                      data-ocid="rx.drug_substituted_brand.input"
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -3818,6 +4365,18 @@ function DrugRow({
           />
         </td>
         <td className={cellCls}>
+          <select
+            className={`${inp} w-20`}
+            value={drug.dispensedAs ?? ""}
+            onChange={(e) => onUpdate("dispensedAs", e.target.value)}
+          >
+            <option value="">—</option>
+            <option value="brand">Brand</option>
+            <option value="generic">Generic</option>
+            <option value="substituted">Substituted</option>
+          </select>
+        </td>
+        <td className={cellCls}>
           <button type="button" onClick={onEdit} className="text-teal-600">
             <Check className="w-3.5 h-3.5" />
           </button>
@@ -3872,6 +4431,19 @@ function DrugRow({
       <td className={cellCls}>{drug.instructionBn || drug.instructions}</td>
       <td className={cellCls}>
         {drug.specialInstructionBn || drug.specialInstruction}
+      </td>
+      <td className={cellCls}>
+        {drug.dispensedAs ? (
+          <span
+            className={`text-xs px-1.5 py-0.5 rounded font-medium ${drug.dispensedAs === "substituted" ? "bg-amber-100 text-amber-700" : "bg-teal-50 text-teal-700"}`}
+          >
+            {drug.dispensedAs === "substituted" && drug.substitutedBrand
+              ? `Sub: ${drug.substitutedBrand}`
+              : drug.dispensedAs}
+          </span>
+        ) : (
+          <span className="text-gray-400 text-xs">—</span>
+        )}
       </td>
       <td className={`${cellCls} flex gap-1`}>
         <button

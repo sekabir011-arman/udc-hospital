@@ -111,33 +111,92 @@ function savePublicBookings(data: PublicBooking[]) {
   localStorage.setItem("public_appointment_requests", JSON.stringify(data));
 }
 
+// ─── Classroom helpers ────────────────────────────────────────────────────────
+
+const DAY_ORDER = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+];
+
+function isNewItem(dateStr: string): boolean {
+  if (!dateStr) return false;
+  const diff = Date.now() - new Date(dateStr).getTime();
+  return diff >= 0 && diff < 7 * 24 * 60 * 60 * 1000;
+}
+
+function buildGCalUrl(
+  subject: string,
+  location: string,
+  doctorName: string,
+): string {
+  const today = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const dateStr = `${today.getFullYear()}${pad(today.getMonth() + 1)}${pad(today.getDate())}`;
+  const params = new URLSearchParams({
+    action: "TEMPLATE",
+    text: subject,
+    details: `${doctorName} classroom session`,
+    dates: `${dateStr}/${dateStr}`,
+    location: location,
+  });
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
 // ─── Classroom Tab Content ────────────────────────────────────────────────────
 
 function ClassroomContent({
   doctorKey,
   isAdmin,
+  isConsultantDoctor,
+  currentDoctorId,
   updateField,
 }: {
   doctorKey: DoctorKey;
   isAdmin: boolean;
+  isConsultantDoctor?: boolean;
+  currentDoctorId?: string;
   updateField: (key: DoctorKey, path: string, value: any) => void;
 }) {
   const { getContent } = useDoctorContent();
   const doc = getContent(doctorKey);
   const cls = doc.classroom;
+
+  // Permission: admin OR consultant editing their own classroom
+  const canEdit =
+    isAdmin || (isConsultantDoctor && currentDoctorId === doctorKey);
+
   const color = doctorKey === "arman" ? "text-primary" : "text-rose-600";
   const bg = doctorKey === "arman" ? "bg-primary/10" : "bg-rose-100";
   const border =
     doctorKey === "arman" ? "border-primary/20" : "border-rose-200";
+  const activeTabColor =
+    doctorKey === "arman"
+      ? "data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+      : "data-[state=active]:bg-rose-600 data-[state=active]:text-white";
+
+  // Global search
+  const [globalSearch, setGlobalSearch] = useState("");
+  const q = globalSearch.toLowerCase().trim();
 
   // Announcement state
   const [addAnn, setAddAnn] = useState(false);
-  const [annForm, setAnnForm] = useState({ title: "", date: "", body: "" });
+  const [annForm, setAnnForm] = useState({
+    title: "",
+    date: "",
+    body: "",
+    isPinned: false,
+  });
   const [editAnnIdx, setEditAnnIdx] = useState<number | null>(null);
   const [editAnnForm, setEditAnnForm] = useState({
     title: "",
     date: "",
     body: "",
+    isPinned: false,
   });
 
   // Note state
@@ -146,12 +205,16 @@ function ClassroomContent({
     title: "",
     description: "",
     link: "",
+    pdfUrl: "",
+    datePublished: new Date().toISOString().split("T")[0],
   });
   const [editNoteIdx, setEditNoteIdx] = useState<number | null>(null);
   const [editNoteForm, setEditNoteForm] = useState({
     title: "",
     description: "",
     link: "",
+    pdfUrl: "",
+    datePublished: "",
   });
 
   // Video state
@@ -160,12 +223,14 @@ function ClassroomContent({
     title: "",
     url: "",
     description: "",
+    isFeatured: false,
   });
   const [editVideoIdx, setEditVideoIdx] = useState<number | null>(null);
   const [editVideoForm, setEditVideoForm] = useState({
     title: "",
     url: "",
     description: "",
+    isFeatured: false,
   });
 
   // Schedule state
@@ -183,85 +248,160 @@ function ClassroomContent({
     subject: "",
     venue: "",
   });
-  // Search
-  const [noteSearch, setNoteSearch] = useState("");
-  const [videoSearch, setVideoSearch] = useState("");
 
+  // ── Filtered data ────────────────────────────────────────────────────────────
+  const filteredAnn = (cls.announcements as any[]).filter(
+    (a: any) =>
+      !q ||
+      a.title?.toLowerCase().includes(q) ||
+      a.body?.toLowerCase().includes(q),
+  );
+  const filteredNotes = (cls.notes as any[]).filter(
+    (n: any) =>
+      !q ||
+      n.title?.toLowerCase().includes(q) ||
+      n.description?.toLowerCase().includes(q),
+  );
+  const filteredVideos = (cls.videos as any[]).filter(
+    (v: any) =>
+      !q ||
+      v.title?.toLowerCase().includes(q) ||
+      v.description?.toLowerCase().includes(q),
+  );
+  const filteredSchedule = (cls.schedule as any[]).filter(
+    (s: any) =>
+      !q ||
+      s.subject?.toLowerCase().includes(q) ||
+      s.venue?.toLowerCase().includes(q),
+  );
+
+  // Auto-switch to tab with most results when searching
+  const tabCounts = {
+    announcements: filteredAnn.length,
+    notes: filteredNotes.length,
+    videos: filteredVideos.length,
+    schedule: filteredSchedule.length,
+  };
+  const defaultTab = q
+    ? (Object.entries(tabCounts).sort((a, b) => b[1] - a[1])[0][0] as string)
+    : "announcements";
+
+  // Sorted schedule (Mon first)
+  const sortedSchedule = [...filteredSchedule].sort((a: any, b: any) => {
+    const ai = DAY_ORDER.indexOf(a.day);
+    const bi = DAY_ORDER.indexOf(b.day);
+    if (ai !== bi) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+    return (a.time || "").localeCompare(b.time || "");
+  });
+
+  // ── Announcement CRUD ────────────────────────────────────────────────────────
   const saveAnn = () => {
     if (!annForm.title || !annForm.date || !annForm.body) return;
-    const updated = [...(cls.announcements || []), annForm];
+    const entry = { ...annForm, datePublished: annForm.date };
+    const updated = [...(cls.announcements || []), entry];
     updateField(doctorKey, "classroom.announcements", updated);
-    setAnnForm({ title: "", date: "", body: "" });
+    setAnnForm({ title: "", date: "", body: "", isPinned: false });
     setAddAnn(false);
     toast.success("Announcement added");
   };
-
   const deleteAnn = (idx: number) => {
-    const updated = cls.announcements.filter((_: any, i: number) => i !== idx);
-    updateField(doctorKey, "classroom.announcements", updated);
+    updateField(
+      doctorKey,
+      "classroom.announcements",
+      (cls.announcements as any[]).filter((_: any, i: number) => i !== idx),
+    );
     toast.success("Announcement deleted");
   };
-
   const saveEditAnn = () => {
     if (editAnnIdx === null) return;
-    const updated = cls.announcements.map((a: any, i: number) =>
+    const updated = (cls.announcements as any[]).map((a: any, i: number) =>
       i === editAnnIdx ? editAnnForm : a,
     );
     updateField(doctorKey, "classroom.announcements", updated);
     setEditAnnIdx(null);
     toast.success("Announcement updated");
   };
+  const togglePin = (idx: number) => {
+    const updated = (cls.announcements as any[]).map((a: any, i: number) =>
+      i === idx ? { ...a, isPinned: !a.isPinned } : a,
+    );
+    updateField(doctorKey, "classroom.announcements", updated);
+  };
 
+  // ── Note CRUD ────────────────────────────────────────────────────────────────
   const saveNote = () => {
     if (!noteForm.title) return;
-    const updated = [...(cls.notes || []), noteForm];
+    const entry = { ...noteForm, downloadCount: 0 };
+    const updated = [...(cls.notes || []), entry];
     updateField(doctorKey, "classroom.notes", updated);
-    setNoteForm({ title: "", description: "", link: "" });
+    setNoteForm({
+      title: "",
+      description: "",
+      link: "",
+      pdfUrl: "",
+      datePublished: new Date().toISOString().split("T")[0],
+    });
     setAddNote(false);
     toast.success("Note added");
   };
-
   const deleteNote = (idx: number) => {
-    const updated = cls.notes.filter((_: any, i: number) => i !== idx);
-    updateField(doctorKey, "classroom.notes", updated);
+    updateField(
+      doctorKey,
+      "classroom.notes",
+      (cls.notes as any[]).filter((_: any, i: number) => i !== idx),
+    );
     toast.success("Note deleted");
   };
-
   const saveEditNote = () => {
     if (editNoteIdx === null) return;
-    const updated = cls.notes.map((n: any, i: number) =>
+    const updated = (cls.notes as any[]).map((n: any, i: number) =>
       i === editNoteIdx ? editNoteForm : n,
     );
     updateField(doctorKey, "classroom.notes", updated);
     setEditNoteIdx(null);
     toast.success("Note updated");
   };
+  const incrementDownload = (idx: number) => {
+    const updated = (cls.notes as any[]).map((n: any, i: number) =>
+      i === idx ? { ...n, downloadCount: (n.downloadCount || 0) + 1 } : n,
+    );
+    updateField(doctorKey, "classroom.notes", updated);
+  };
 
+  // ── Video CRUD ───────────────────────────────────────────────────────────────
   const saveVideo = () => {
     if (!videoForm.title || !videoForm.url) return;
     const updated = [...(cls.videos || []), videoForm];
     updateField(doctorKey, "classroom.videos", updated);
-    setVideoForm({ title: "", url: "", description: "" });
+    setVideoForm({ title: "", url: "", description: "", isFeatured: false });
     setAddVideo(false);
     toast.success("Video added");
   };
-
   const deleteVideo = (idx: number) => {
-    const updated = cls.videos.filter((_: any, i: number) => i !== idx);
-    updateField(doctorKey, "classroom.videos", updated);
+    updateField(
+      doctorKey,
+      "classroom.videos",
+      (cls.videos as any[]).filter((_: any, i: number) => i !== idx),
+    );
     toast.success("Video deleted");
   };
-
   const saveEditVideo = () => {
     if (editVideoIdx === null) return;
-    const updated = cls.videos.map((v: any, i: number) =>
+    const updated = (cls.videos as any[]).map((v: any, i: number) =>
       i === editVideoIdx ? editVideoForm : v,
     );
     updateField(doctorKey, "classroom.videos", updated);
     setEditVideoIdx(null);
     toast.success("Video updated");
   };
+  const toggleFeatured = (idx: number) => {
+    const updated = (cls.videos as any[]).map((v: any, i: number) =>
+      i === idx ? { ...v, isFeatured: !v.isFeatured } : v,
+    );
+    updateField(doctorKey, "classroom.videos", updated);
+  };
 
+  // ── Schedule CRUD ────────────────────────────────────────────────────────────
   const saveSched = () => {
     if (!schedForm.day || !schedForm.subject) return;
     const updated = [...(cls.schedule || []), schedForm];
@@ -270,16 +410,17 @@ function ClassroomContent({
     setAddSchedule(false);
     toast.success("Schedule entry added");
   };
-
   const deleteSched = (idx: number) => {
-    const updated = cls.schedule.filter((_: any, i: number) => i !== idx);
-    updateField(doctorKey, "classroom.schedule", updated);
+    updateField(
+      doctorKey,
+      "classroom.schedule",
+      (cls.schedule as any[]).filter((_: any, i: number) => i !== idx),
+    );
     toast.success("Schedule entry deleted");
   };
-
   const saveEditSched = () => {
     if (editSchedIdx === null) return;
-    const updated = cls.schedule.map((s: any, i: number) =>
+    const updated = (cls.schedule as any[]).map((s: any, i: number) =>
       i === editSchedIdx ? editSchedForm : s,
     );
     updateField(doctorKey, "classroom.schedule", updated);
@@ -287,759 +428,1048 @@ function ClassroomContent({
     toast.success("Schedule updated");
   };
 
+  // Sorted announcements: pinned first
+  const sortedAnn = [...filteredAnn].sort(
+    (a: any, b: any) => (b.isPinned ? 1 : 0) - (a.isPinned ? 1 : 0),
+  );
+  // Featured videos first
+  const sortedVideos = [...filteredVideos].sort(
+    (a: any, b: any) => (b.isFeatured ? 1 : 0) - (a.isFeatured ? 1 : 0),
+  );
+
   return (
-    <div className="space-y-6">
-      {/* Announcements */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3
-            className={`font-semibold text-lg flex items-center gap-2 ${color}`}
+    <div className="space-y-4">
+      {/* Global Search */}
+      <div className="relative" data-ocid="classroom.global.search_input">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+        <Input
+          value={globalSearch}
+          onChange={(e) => setGlobalSearch(e.target.value)}
+          placeholder="Search announcements, notes, videos, schedule…"
+          className="pl-9 h-10"
+        />
+        {globalSearch && (
+          <button
+            type="button"
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            onClick={() => setGlobalSearch("")}
+            aria-label="Clear search"
           >
-            <span
-              className={`w-7 h-7 rounded-full ${bg} flex items-center justify-center`}
+            <X className="w-4 h-4" />
+          </button>
+        )}
+      </div>
+
+      {/* Content Tabs */}
+      <Tabs
+        defaultValue={defaultTab}
+        key={defaultTab}
+        className="space-y-4"
+        data-ocid="classroom.content.panel"
+      >
+        <TabsList className="w-full grid grid-cols-2 sm:grid-cols-4 h-auto gap-1 bg-muted/50 p-1 rounded-xl">
+          {[
+            {
+              value: "announcements",
+              label: "Announcements",
+              count: tabCounts.announcements,
+              icon: <BriefcaseMedical className="w-3.5 h-3.5" />,
+            },
+            {
+              value: "notes",
+              label: "Lecture Notes",
+              count: tabCounts.notes,
+              icon: <BookOpen className="w-3.5 h-3.5" />,
+            },
+            {
+              value: "videos",
+              label: "Video Lectures",
+              count: tabCounts.videos,
+              icon: <Youtube className="w-3.5 h-3.5" />,
+            },
+            {
+              value: "schedule",
+              label: "Class Schedule",
+              count: tabCounts.schedule,
+              icon: <CalendarDays className="w-3.5 h-3.5" />,
+            },
+          ].map((tab) => (
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              className={`flex items-center gap-1.5 px-2 py-2 text-xs sm:text-sm rounded-lg ${activeTabColor}`}
+              data-ocid={`classroom.${tab.value}.tab`}
             >
-              <BriefcaseMedical className="w-4 h-4" />
-            </span>
-            Announcements
-          </h3>
-          {isAdmin && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              onClick={() => setAddAnn(true)}
-              data-ocid="classroom.ann.open_modal_button"
-            >
-              <Plus className="w-3 h-3" /> Add
-            </Button>
-          )}
-        </div>
-        <div className="space-y-3">
-          {cls.announcements.map((ann: any, idx: number) => (
-            <Card key={ann.title + String(idx)} className={`border ${border}`}>
-              <CardContent className="p-4">
-                {editAnnIdx === idx ? (
-                  <div className="space-y-2">
-                    <Input
-                      value={editAnnForm.title}
-                      onChange={(e) =>
-                        setEditAnnForm((f) => ({ ...f, title: e.target.value }))
-                      }
-                      placeholder="Title"
-                    />
-                    <Input
-                      type="date"
-                      value={editAnnForm.date}
-                      onChange={(e) =>
-                        setEditAnnForm((f) => ({ ...f, date: e.target.value }))
-                      }
-                    />
-                    <Textarea
-                      value={editAnnForm.body}
-                      onChange={(e) =>
-                        setEditAnnForm((f) => ({ ...f, body: e.target.value }))
-                      }
-                      placeholder="Body"
-                      rows={2}
-                    />
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        onClick={saveEditAnn}
-                        data-ocid="classroom.ann.save_button"
-                      >
-                        Save
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setEditAnnIdx(null)}
-                        data-ocid="classroom.ann.cancel_button"
-                      >
-                        Cancel
-                      </Button>
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="font-semibold text-foreground">
-                        {ann.title}
-                      </p>
-                      <p className="text-muted-foreground text-sm mt-1">
-                        {ann.body}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Badge variant="outline" className="text-xs">
-                        {new Date(ann.date).toLocaleDateString("en-GB", {
-                          day: "numeric",
-                          month: "short",
-                          year: "numeric",
-                        })}
-                      </Badge>
-                      {isAdmin && (
-                        <>
-                          <button
-                            type="button"
-                            className="p-1 hover:text-primary"
-                            onClick={() => {
-                              setEditAnnIdx(idx);
-                              setEditAnnForm(ann);
-                            }}
-                            data-ocid={`classroom.ann.edit_button.${idx + 1}`}
-                          >
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            className="p-1 hover:text-destructive"
-                            onClick={() => deleteAnn(idx)}
-                            data-ocid={`classroom.ann.delete_button.${idx + 1}`}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+              {tab.icon}
+              <span className="hidden sm:inline">{tab.label}</span>
+              <span className="sm:hidden">{tab.label.split(" ")[0]}</span>
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-background/60 text-xs font-bold">
+                {tab.count}
+              </span>
+            </TabsTrigger>
           ))}
-        </div>
-        {/* Add announcement dialog */}
-        <Dialog open={addAnn} onOpenChange={setAddAnn}>
-          <DialogContent className="max-w-sm" data-ocid="classroom.ann.dialog">
-            <DialogHeader>
-              <DialogTitle>Add Announcement</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label>Title</Label>
-                <Input
-                  value={annForm.title}
-                  onChange={(e) =>
-                    setAnnForm((f) => ({ ...f, title: e.target.value }))
-                  }
-                  placeholder="Announcement title"
-                  data-ocid="classroom.ann.input"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Date</Label>
-                <Input
-                  type="date"
-                  value={annForm.date}
-                  onChange={(e) =>
-                    setAnnForm((f) => ({ ...f, date: e.target.value }))
-                  }
-                  data-ocid="classroom.ann.input"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Body</Label>
-                <Textarea
-                  value={annForm.body}
-                  onChange={(e) =>
-                    setAnnForm((f) => ({ ...f, body: e.target.value }))
-                  }
-                  placeholder="Announcement text..."
-                  rows={3}
-                  data-ocid="classroom.ann.textarea"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  onClick={saveAnn}
-                  className="flex-1"
-                  data-ocid="classroom.ann.submit_button"
-                >
-                  Add
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setAddAnn(false)}
-                  className="flex-1"
-                  data-ocid="classroom.ann.cancel_button"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+        </TabsList>
 
-      {/* Class Schedule */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3
-            className={`font-semibold text-lg flex items-center gap-2 ${color}`}
-          >
-            <span
-              className={`w-7 h-7 rounded-full ${bg} flex items-center justify-center`}
-            >
-              <CalendarDays className="w-4 h-4" />
-            </span>
-            Class Schedule
-          </h3>
-          {isAdmin && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              onClick={() => setAddSchedule(true)}
-              data-ocid="classroom.schedule.open_modal_button"
-            >
-              <Plus className="w-3 h-3" /> Add
-            </Button>
-          )}
-        </div>
-        <div className="rounded-xl border overflow-hidden">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/50">
-                <TableHead className="font-semibold">Day</TableHead>
-                <TableHead className="font-semibold">Time</TableHead>
-                <TableHead className="font-semibold">Subject</TableHead>
-                <TableHead className="font-semibold">Venue</TableHead>
-                {isAdmin && (
-                  <TableHead className="font-semibold w-16">Actions</TableHead>
-                )}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {cls.schedule.map((s: any, idx: number) => (
-                <TableRow key={s.day + String(idx)}>
-                  {editSchedIdx === idx ? (
-                    <TableCell colSpan={isAdmin ? 5 : 4}>
-                      <div className="flex flex-wrap gap-2">
-                        <Input
-                          value={editSchedForm.day}
-                          onChange={(e) =>
-                            setEditSchedForm((f) => ({
-                              ...f,
-                              day: e.target.value,
-                            }))
-                          }
-                          placeholder="Day"
-                          className="w-24"
-                        />
-                        <Input
-                          value={editSchedForm.time}
-                          onChange={(e) =>
-                            setEditSchedForm((f) => ({
-                              ...f,
-                              time: e.target.value,
-                            }))
-                          }
-                          placeholder="Time"
-                          className="w-36"
-                        />
-                        <Input
-                          value={editSchedForm.subject}
-                          onChange={(e) =>
-                            setEditSchedForm((f) => ({
-                              ...f,
-                              subject: e.target.value,
-                            }))
-                          }
-                          placeholder="Subject"
-                          className="w-36"
-                        />
-                        <Input
-                          value={editSchedForm.venue}
-                          onChange={(e) =>
-                            setEditSchedForm((f) => ({
-                              ...f,
-                              venue: e.target.value,
-                            }))
-                          }
-                          placeholder="Venue"
-                          className="w-36"
-                        />
-                        <Button
-                          size="sm"
-                          onClick={saveEditSched}
-                          data-ocid="classroom.schedule.save_button"
-                        >
-                          Save
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setEditSchedIdx(null)}
-                          data-ocid="classroom.schedule.cancel_button"
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </TableCell>
-                  ) : (
-                    <>
-                      <TableCell className="font-medium">{s.day}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {s.time}
-                      </TableCell>
-                      <TableCell>{s.subject}</TableCell>
-                      <TableCell className="text-muted-foreground">
-                        {s.venue}
-                      </TableCell>
-                      {isAdmin && (
-                        <TableCell>
-                          <div className="flex gap-1">
-                            <button
-                              type="button"
-                              className="p-1 hover:text-primary"
-                              onClick={() => {
-                                setEditSchedIdx(idx);
-                                setEditSchedForm(s);
-                              }}
-                              data-ocid={`classroom.schedule.edit_button.${idx + 1}`}
-                            >
-                              <Pencil className="w-3.5 h-3.5" />
-                            </button>
-                            <button
-                              type="button"
-                              className="p-1 hover:text-destructive"
-                              onClick={() => deleteSched(idx)}
-                              data-ocid={`classroom.schedule.delete_button.${idx + 1}`}
-                            >
-                              <Trash2 className="w-3.5 h-3.5" />
-                            </button>
-                          </div>
-                        </TableCell>
-                      )}
-                    </>
-                  )}
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-        {/* Add schedule dialog */}
-        <Dialog open={addSchedule} onOpenChange={setAddSchedule}>
-          <DialogContent
-            className="max-w-sm"
-            data-ocid="classroom.schedule.dialog"
-          >
-            <DialogHeader>
-              <DialogTitle>Add Schedule Entry</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label>Day</Label>
-                <Input
-                  value={schedForm.day}
-                  onChange={(e) =>
-                    setSchedForm((f) => ({ ...f, day: e.target.value }))
-                  }
-                  placeholder="e.g., Monday"
-                  data-ocid="classroom.schedule.input"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Time</Label>
-                <Input
-                  value={schedForm.time}
-                  onChange={(e) =>
-                    setSchedForm((f) => ({ ...f, time: e.target.value }))
-                  }
-                  placeholder="e.g., 8:00 AM – 10:00 AM"
-                  data-ocid="classroom.schedule.input"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Subject</Label>
-                <Input
-                  value={schedForm.subject}
-                  onChange={(e) =>
-                    setSchedForm((f) => ({ ...f, subject: e.target.value }))
-                  }
-                  placeholder="Subject name"
-                  data-ocid="classroom.schedule.input"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Venue</Label>
-                <Input
-                  value={schedForm.venue}
-                  onChange={(e) =>
-                    setSchedForm((f) => ({ ...f, venue: e.target.value }))
-                  }
-                  placeholder="Lecture Hall / Ward"
-                  data-ocid="classroom.schedule.input"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  onClick={saveSched}
-                  className="flex-1"
-                  data-ocid="classroom.schedule.submit_button"
-                >
-                  Add
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setAddSchedule(false)}
-                  className="flex-1"
-                  data-ocid="classroom.schedule.cancel_button"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {/* Lecture Notes */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3
-            className={`font-semibold text-lg flex items-center gap-2 ${color}`}
-          >
-            <span
-              className={`w-7 h-7 rounded-full ${bg} flex items-center justify-center`}
-            >
-              <BookOpen className="w-4 h-4" />
-            </span>
-            Lecture Notes
-          </h3>
-          {isAdmin && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              onClick={() => setAddNote(true)}
-              data-ocid="classroom.notes.open_modal_button"
-            >
-              <Plus className="w-3 h-3" /> Add
-            </Button>
-          )}
-        </div>
-        <div className="mb-3">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={noteSearch}
-              onChange={(e) => setNoteSearch(e.target.value)}
-              placeholder="Search lecture notes..."
-              className="pl-8 h-9 text-sm"
-              data-ocid="classroom.notes.search_input"
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {cls.notes
-            .filter(
-              (note: any) =>
-                !noteSearch ||
-                note.title?.toLowerCase().includes(noteSearch.toLowerCase()) ||
-                note.description
-                  ?.toLowerCase()
-                  .includes(noteSearch.toLowerCase()),
-            )
-            .map((note: any, idx: number) => (
-              <Card
-                key={note.title + String(idx)}
-                className={`border ${border} hover:shadow-md transition-shadow`}
+        {/* ── Announcements Tab ───────────────────────────────────────────── */}
+        <TabsContent value="announcements" className="space-y-3">
+          {canEdit && (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => setAddAnn(true)}
+                data-ocid="classroom.ann.open_modal_button"
               >
-                <CardContent className="p-4 flex items-start gap-3">
-                  <div
-                    className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center shrink-0 mt-0.5`}
-                  >
-                    <BookOpen className={`w-4 h-4 ${color}`} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    {editNoteIdx === idx ? (
-                      <div className="space-y-1.5">
+                <Plus className="w-3 h-3" /> Add Announcement
+              </Button>
+            </div>
+          )}
+          {sortedAnn.length === 0 && (
+            <p
+              className="text-sm text-muted-foreground text-center py-6"
+              data-ocid="classroom.ann.empty_state"
+            >
+              No announcements yet.
+            </p>
+          )}
+          {/* Pinned section label */}
+          {sortedAnn.some((a: any) => a.isPinned) && (
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
+              📌 Pinned
+            </p>
+          )}
+          {sortedAnn.map((ann: any, displayIdx: number) => {
+            const realIdx = (cls.announcements as any[]).indexOf(ann);
+            const showUnpinnedLabel =
+              displayIdx > 0 &&
+              !ann.isPinned &&
+              sortedAnn[displayIdx - 1]?.isPinned;
+            return (
+              <div key={ann.title + String(realIdx)}>
+                {showUnpinnedLabel && (
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1 mt-3">
+                    Recent
+                  </p>
+                )}
+                <Card
+                  className={`border ${ann.isPinned ? (doctorKey === "arman" ? "border-primary/40 bg-primary/5" : "border-rose-300 bg-rose-50/50") : border}`}
+                >
+                  <CardContent className="p-4">
+                    {editAnnIdx === realIdx ? (
+                      <div className="space-y-2">
                         <Input
-                          value={editNoteForm.title}
+                          value={editAnnForm.title}
                           onChange={(e) =>
-                            setEditNoteForm((f) => ({
+                            setEditAnnForm((f) => ({
                               ...f,
                               title: e.target.value,
                             }))
                           }
                           placeholder="Title"
-                          className="h-7 text-xs"
                         />
                         <Input
-                          value={editNoteForm.description}
+                          type="date"
+                          value={editAnnForm.date}
                           onChange={(e) =>
-                            setEditNoteForm((f) => ({
+                            setEditAnnForm((f) => ({
                               ...f,
-                              description: e.target.value,
+                              date: e.target.value,
                             }))
                           }
-                          placeholder="Description"
-                          className="h-7 text-xs"
                         />
-                        <Input
-                          value={editNoteForm.link}
+                        <Textarea
+                          value={editAnnForm.body}
                           onChange={(e) =>
-                            setEditNoteForm((f) => ({
+                            setEditAnnForm((f) => ({
                               ...f,
-                              link: e.target.value,
+                              body: e.target.value,
                             }))
                           }
-                          placeholder="Link (URL)"
-                          className="h-7 text-xs"
+                          placeholder="Body"
+                          rows={2}
                         />
-                        <div className="flex gap-1">
+                        <div className="flex gap-2">
                           <Button
                             size="sm"
-                            className="h-6 text-xs"
-                            onClick={saveEditNote}
-                            data-ocid="classroom.notes.save_button"
+                            onClick={saveEditAnn}
+                            data-ocid="classroom.ann.save_button"
                           >
                             Save
                           </Button>
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-6 text-xs"
-                            onClick={() => setEditNoteIdx(null)}
-                            data-ocid="classroom.notes.cancel_button"
+                            onClick={() => setEditAnnIdx(null)}
+                            data-ocid="classroom.ann.cancel_button"
                           >
                             Cancel
                           </Button>
                         </div>
                       </div>
                     ) : (
-                      <>
-                        <p className="font-medium text-sm text-foreground">
-                          {note.title}
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {note.description}
-                        </p>
-                      </>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap mb-1">
+                            {ann.isPinned && (
+                              <span className="text-xs">📌</span>
+                            )}
+                            <p className="font-semibold text-foreground">
+                              {ann.title}
+                            </p>
+                            {isNewItem(ann.datePublished || ann.date) && (
+                              <Badge className="text-[10px] px-1.5 py-0 bg-emerald-500 text-white border-0">
+                                New
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-muted-foreground text-sm">
+                            {ann.body}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <Badge
+                            variant="outline"
+                            className="text-xs whitespace-nowrap"
+                          >
+                            {new Date(ann.date).toLocaleDateString("en-GB", {
+                              day: "numeric",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </Badge>
+                          {canEdit && (
+                            <>
+                              <button
+                                type="button"
+                                title={ann.isPinned ? "Unpin" : "Pin"}
+                                className={`p-1 transition-colors ${ann.isPinned ? color : "hover:text-amber-500"}`}
+                                onClick={() => togglePin(realIdx)}
+                                data-ocid={`classroom.ann.toggle.${realIdx + 1}`}
+                              >
+                                <span className="text-xs">
+                                  {ann.isPinned ? "📌" : "📍"}
+                                </span>
+                              </button>
+                              <button
+                                type="button"
+                                className="p-1 hover:text-primary"
+                                onClick={() => {
+                                  setEditAnnIdx(realIdx);
+                                  setEditAnnForm({
+                                    title: ann.title,
+                                    date: ann.date,
+                                    body: ann.body,
+                                    isPinned: !!ann.isPinned,
+                                  });
+                                }}
+                                data-ocid={`classroom.ann.edit_button.${realIdx + 1}`}
+                              >
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                className="p-1 hover:text-destructive"
+                                onClick={() => deleteAnn(realIdx)}
+                                data-ocid={`classroom.ann.delete_button.${realIdx + 1}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
                     )}
-                  </div>
-                  <div className="flex items-start gap-1 shrink-0">
-                    <a href={note.link} className={`${color} hover:opacity-70`}>
-                      <Download className="w-4 h-4" />
-                    </a>
-                    {isAdmin && (
-                      <>
-                        <button
-                          type="button"
-                          className="p-0.5 hover:text-primary"
-                          onClick={() => {
-                            setEditNoteIdx(idx);
-                            setEditNoteForm(note);
-                          }}
-                          data-ocid={`classroom.notes.edit_button.${idx + 1}`}
-                        >
-                          <Pencil className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          className="p-0.5 hover:text-destructive"
-                          onClick={() => deleteNote(idx)}
-                          data-ocid={`classroom.notes.delete_button.${idx + 1}`}
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-        </div>
-        <Dialog open={addNote} onOpenChange={setAddNote}>
-          <DialogContent
-            className="max-w-sm"
-            data-ocid="classroom.notes.dialog"
-          >
-            <DialogHeader>
-              <DialogTitle>Add Lecture Note</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label>Title</Label>
-                <Input
-                  value={noteForm.title}
-                  onChange={(e) =>
-                    setNoteForm((f) => ({ ...f, title: e.target.value }))
-                  }
-                  placeholder="Note title"
-                  data-ocid="classroom.notes.input"
-                />
+                  </CardContent>
+                </Card>
               </div>
-              <div className="space-y-1.5">
-                <Label>Description</Label>
-                <Input
-                  value={noteForm.description}
-                  onChange={(e) =>
-                    setNoteForm((f) => ({ ...f, description: e.target.value }))
-                  }
-                  placeholder="Brief description"
-                  data-ocid="classroom.notes.input"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Link (URL)</Label>
-                <Input
-                  value={noteForm.link}
-                  onChange={(e) =>
-                    setNoteForm((f) => ({ ...f, link: e.target.value }))
-                  }
-                  placeholder="https://..."
-                  data-ocid="classroom.notes.input"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  onClick={saveNote}
-                  className="flex-1"
-                  data-ocid="classroom.notes.submit_button"
-                >
-                  Add
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setAddNote(false)}
-                  className="flex-1"
-                  data-ocid="classroom.notes.cancel_button"
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+            );
+          })}
 
-      {/* Video Links */}
-      <div>
-        <div className="flex items-center justify-between mb-3">
-          <h3
-            className={`font-semibold text-lg flex items-center gap-2 ${color}`}
-          >
-            <span
-              className={`w-7 h-7 rounded-full ${bg} flex items-center justify-center`}
+          {/* Add announcement dialog */}
+          <Dialog open={addAnn} onOpenChange={setAddAnn}>
+            <DialogContent
+              className="max-w-sm"
+              data-ocid="classroom.ann.dialog"
             >
-              <Youtube className="w-4 h-4" />
-            </span>
-            Video Lectures
-          </h3>
-          {isAdmin && (
-            <Button
-              size="sm"
-              variant="outline"
-              className="gap-1"
-              onClick={() => setAddVideo(true)}
-              data-ocid="classroom.videos.open_modal_button"
-            >
-              <Plus className="w-3 h-3" /> Add
-            </Button>
-          )}
-        </div>
-        <div className="mb-3">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              value={videoSearch}
-              onChange={(e) => setVideoSearch(e.target.value)}
-              placeholder="Search video lectures..."
-              className="pl-8 h-9 text-sm"
-              data-ocid="classroom.videos.search_input"
-            />
-          </div>
-        </div>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {cls.videos
-            .filter(
-              (vid: any) =>
-                !videoSearch ||
-                vid.title?.toLowerCase().includes(videoSearch.toLowerCase()) ||
-                vid.description
-                  ?.toLowerCase()
-                  .includes(videoSearch.toLowerCase()),
-            )
-            .map((vid: any, idx: number) => (
-              <VideoThumbnailCard
-                key={vid.title + String(idx)}
-                vid={vid}
-                idx={idx}
-                isAdmin={isAdmin}
-                editVideoIdx={editVideoIdx}
-                editVideoForm={editVideoForm}
-                setEditVideoIdx={setEditVideoIdx}
-                setEditVideoForm={setEditVideoForm}
-                onSaveEdit={saveEditVideo}
-                onDelete={deleteVideo}
-              />
-            ))}
-        </div>
-        <Dialog open={addVideo} onOpenChange={setAddVideo}>
-          <DialogContent
-            className="max-w-sm"
-            data-ocid="classroom.videos.dialog"
-          >
-            <DialogHeader>
-              <DialogTitle>Add Video</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-3">
-              <div className="space-y-1.5">
-                <Label>Title</Label>
-                <Input
-                  value={videoForm.title}
-                  onChange={(e) =>
-                    setVideoForm((f) => ({ ...f, title: e.target.value }))
-                  }
-                  placeholder="Video title"
-                  data-ocid="classroom.videos.input"
-                />
+              <DialogHeader>
+                <DialogTitle>Add Announcement</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Title</Label>
+                  <Input
+                    value={annForm.title}
+                    onChange={(e) =>
+                      setAnnForm((f) => ({ ...f, title: e.target.value }))
+                    }
+                    placeholder="Announcement title"
+                    data-ocid="classroom.ann.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Date</Label>
+                  <Input
+                    type="date"
+                    value={annForm.date}
+                    onChange={(e) =>
+                      setAnnForm((f) => ({ ...f, date: e.target.value }))
+                    }
+                    data-ocid="classroom.ann.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Body</Label>
+                  <Textarea
+                    value={annForm.body}
+                    onChange={(e) =>
+                      setAnnForm((f) => ({ ...f, body: e.target.value }))
+                    }
+                    placeholder="Announcement text..."
+                    rows={3}
+                    data-ocid="classroom.ann.textarea"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="ann-pin"
+                    checked={annForm.isPinned}
+                    onChange={(e) =>
+                      setAnnForm((f) => ({ ...f, isPinned: e.target.checked }))
+                    }
+                    className="accent-primary"
+                    data-ocid="classroom.ann.checkbox"
+                  />
+                  <Label htmlFor="ann-pin" className="cursor-pointer">
+                    Pin this announcement
+                  </Label>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={saveAnn}
+                    className="flex-1"
+                    data-ocid="classroom.ann.submit_button"
+                  >
+                    Add
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setAddAnn(false)}
+                    className="flex-1"
+                    data-ocid="classroom.ann.cancel_button"
+                  >
+                    Cancel
+                  </Button>
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>YouTube URL</Label>
-                <Input
-                  value={videoForm.url}
-                  onChange={(e) =>
-                    setVideoForm((f) => ({ ...f, url: e.target.value }))
-                  }
-                  placeholder="https://youtube.com/..."
-                  data-ocid="classroom.videos.input"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Description</Label>
-                <Input
-                  value={videoForm.description}
-                  onChange={(e) =>
-                    setVideoForm((f) => ({ ...f, description: e.target.value }))
-                  }
-                  placeholder="Brief description"
-                  data-ocid="classroom.videos.input"
-                />
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  onClick={saveVideo}
-                  className="flex-1"
-                  data-ocid="classroom.videos.submit_button"
-                >
-                  Add
-                </Button>
-                <Button
-                  variant="outline"
-                  onClick={() => setAddVideo(false)}
-                  className="flex-1"
-                  data-ocid="classroom.videos.cancel_button"
-                >
-                  Cancel
-                </Button>
-              </div>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+
+        {/* ── Lecture Notes Tab ───────────────────────────────────────────── */}
+        <TabsContent value="notes" className="space-y-3">
+          {canEdit && (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => setAddNote(true)}
+                data-ocid="classroom.notes.open_modal_button"
+              >
+                <Plus className="w-3 h-3" /> Add Note
+              </Button>
             </div>
-          </DialogContent>
-        </Dialog>
-      </div>
+          )}
+          {filteredNotes.length === 0 && (
+            <p
+              className="text-sm text-muted-foreground text-center py-6"
+              data-ocid="classroom.notes.empty_state"
+            >
+              No lecture notes yet.
+            </p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {filteredNotes.map((note: any, displayIdx: number) => {
+              const realIdx = (cls.notes as any[]).indexOf(note);
+              return (
+                <Card
+                  key={note.title + String(realIdx)}
+                  className={`border ${border} hover:shadow-md transition-shadow`}
+                  data-ocid={`classroom.notes.item.${displayIdx + 1}`}
+                >
+                  <CardContent className="p-4 flex items-start gap-3">
+                    <div
+                      className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center shrink-0 mt-0.5`}
+                    >
+                      {note.pdfUrl ? (
+                        <FileText className="w-4 h-4 text-red-600" />
+                      ) : (
+                        <BookOpen className={`w-4 h-4 ${color}`} />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      {editNoteIdx === realIdx ? (
+                        <div className="space-y-1.5">
+                          <Input
+                            value={editNoteForm.title}
+                            onChange={(e) =>
+                              setEditNoteForm((f) => ({
+                                ...f,
+                                title: e.target.value,
+                              }))
+                            }
+                            placeholder="Title"
+                            className="h-7 text-xs"
+                          />
+                          <Input
+                            value={editNoteForm.description}
+                            onChange={(e) =>
+                              setEditNoteForm((f) => ({
+                                ...f,
+                                description: e.target.value,
+                              }))
+                            }
+                            placeholder="Description"
+                            className="h-7 text-xs"
+                          />
+                          <Input
+                            value={editNoteForm.pdfUrl}
+                            onChange={(e) =>
+                              setEditNoteForm((f) => ({
+                                ...f,
+                                pdfUrl: e.target.value,
+                              }))
+                            }
+                            placeholder="PDF Link (URL)"
+                            className="h-7 text-xs"
+                          />
+                          <Input
+                            value={editNoteForm.link}
+                            onChange={(e) =>
+                              setEditNoteForm((f) => ({
+                                ...f,
+                                link: e.target.value,
+                              }))
+                            }
+                            placeholder="Link (URL)"
+                            className="h-7 text-xs"
+                          />
+                          <Input
+                            type="date"
+                            value={editNoteForm.datePublished}
+                            onChange={(e) =>
+                              setEditNoteForm((f) => ({
+                                ...f,
+                                datePublished: e.target.value,
+                              }))
+                            }
+                            className="h-7 text-xs"
+                          />
+                          <div className="flex gap-1">
+                            <Button
+                              size="sm"
+                              className="h-6 text-xs"
+                              onClick={saveEditNote}
+                              data-ocid="classroom.notes.save_button"
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-6 text-xs"
+                              onClick={() => setEditNoteIdx(null)}
+                              data-ocid="classroom.notes.cancel_button"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <p className="font-medium text-sm text-foreground">
+                            {note.title}
+                          </p>
+                          {note.description && (
+                            <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                              {note.description}
+                            </p>
+                          )}
+                          <div className="flex items-center gap-2 mt-1 flex-wrap">
+                            {note.datePublished && (
+                              <span className="text-[10px] text-muted-foreground">
+                                Published:{" "}
+                                {new Date(
+                                  note.datePublished,
+                                ).toLocaleDateString("en-GB", {
+                                  day: "numeric",
+                                  month: "short",
+                                  year: "numeric",
+                                })}
+                              </span>
+                            )}
+                            {(note.downloadCount || 0) > 0 && (
+                              <span className="text-[10px] text-muted-foreground">
+                                Downloaded {note.downloadCount} times
+                              </span>
+                            )}
+                          </div>
+                          {note.pdfUrl && (
+                            <a
+                              href={note.pdfUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 mt-1.5 text-xs font-medium text-red-600 hover:text-red-700"
+                              onClick={() => incrementDownload(realIdx)}
+                              data-ocid={`classroom.notes.download.${displayIdx + 1}`}
+                            >
+                              <FileText className="w-3 h-3" />
+                              Download PDF
+                            </a>
+                          )}
+                        </>
+                      )}
+                    </div>
+                    {editNoteIdx !== realIdx && (
+                      <div className="flex items-start gap-1 shrink-0">
+                        {note.link && !note.pdfUrl && (
+                          <a
+                            href={note.link}
+                            className={`${color} hover:opacity-70`}
+                            aria-label="View note"
+                          >
+                            <ExternalLink className="w-4 h-4" />
+                          </a>
+                        )}
+                        {canEdit && (
+                          <>
+                            <button
+                              type="button"
+                              className="p-0.5 hover:text-primary"
+                              onClick={() => {
+                                setEditNoteIdx(realIdx);
+                                setEditNoteForm({
+                                  title: note.title,
+                                  description: note.description || "",
+                                  link: note.link || "",
+                                  pdfUrl: note.pdfUrl || "",
+                                  datePublished: note.datePublished || "",
+                                });
+                              }}
+                              data-ocid={`classroom.notes.edit_button.${displayIdx + 1}`}
+                            >
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              className="p-0.5 hover:text-destructive"
+                              onClick={() => deleteNote(realIdx)}
+                              data-ocid={`classroom.notes.delete_button.${displayIdx + 1}`}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          <Dialog open={addNote} onOpenChange={setAddNote}>
+            <DialogContent
+              className="max-w-sm"
+              data-ocid="classroom.notes.dialog"
+            >
+              <DialogHeader>
+                <DialogTitle>Add Lecture Note</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Title</Label>
+                  <Input
+                    value={noteForm.title}
+                    onChange={(e) =>
+                      setNoteForm((f) => ({ ...f, title: e.target.value }))
+                    }
+                    placeholder="Note title"
+                    data-ocid="classroom.notes.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Description</Label>
+                  <Input
+                    value={noteForm.description}
+                    onChange={(e) =>
+                      setNoteForm((f) => ({
+                        ...f,
+                        description: e.target.value,
+                      }))
+                    }
+                    placeholder="Brief description"
+                    data-ocid="classroom.notes.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>PDF Link (URL)</Label>
+                  <Input
+                    value={noteForm.pdfUrl}
+                    onChange={(e) =>
+                      setNoteForm((f) => ({ ...f, pdfUrl: e.target.value }))
+                    }
+                    placeholder="https://...pdf"
+                    data-ocid="classroom.notes.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Web Link (URL)</Label>
+                  <Input
+                    value={noteForm.link}
+                    onChange={(e) =>
+                      setNoteForm((f) => ({ ...f, link: e.target.value }))
+                    }
+                    placeholder="https://..."
+                    data-ocid="classroom.notes.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Date Published</Label>
+                  <Input
+                    type="date"
+                    value={noteForm.datePublished}
+                    onChange={(e) =>
+                      setNoteForm((f) => ({
+                        ...f,
+                        datePublished: e.target.value,
+                      }))
+                    }
+                    data-ocid="classroom.notes.input"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={saveNote}
+                    className="flex-1"
+                    data-ocid="classroom.notes.submit_button"
+                  >
+                    Add
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setAddNote(false)}
+                    className="flex-1"
+                    data-ocid="classroom.notes.cancel_button"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+
+        {/* ── Video Lectures Tab ──────────────────────────────────────────── */}
+        <TabsContent value="videos" className="space-y-3">
+          {canEdit && (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => setAddVideo(true)}
+                data-ocid="classroom.videos.open_modal_button"
+              >
+                <Plus className="w-3 h-3" /> Add Video
+              </Button>
+            </div>
+          )}
+          {sortedVideos.length === 0 && (
+            <p
+              className="text-sm text-muted-foreground text-center py-6"
+              data-ocid="classroom.videos.empty_state"
+            >
+              No videos yet.
+            </p>
+          )}
+          {sortedVideos.some((v: any) => v.isFeatured) && (
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1">
+              ⭐ Featured
+            </p>
+          )}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {sortedVideos.map((vid: any, displayIdx: number) => {
+              const realIdx = (cls.videos as any[]).indexOf(vid);
+              const showNonFeaturedLabel =
+                displayIdx > 0 &&
+                !vid.isFeatured &&
+                sortedVideos[displayIdx - 1]?.isFeatured;
+              return (
+                <div key={vid.title + String(realIdx)}>
+                  {showNonFeaturedLabel && (
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-1 mb-2">
+                      All Videos
+                    </p>
+                  )}
+                  <VideoThumbnailCard
+                    vid={vid}
+                    idx={realIdx}
+                    displayIdx={displayIdx}
+                    isAdmin={!!canEdit}
+                    editVideoIdx={editVideoIdx}
+                    editVideoForm={editVideoForm}
+                    setEditVideoIdx={setEditVideoIdx}
+                    setEditVideoForm={(f) =>
+                      setEditVideoForm(f as typeof editVideoForm)
+                    }
+                    onSaveEdit={saveEditVideo}
+                    onDelete={deleteVideo}
+                    onToggleFeatured={canEdit ? toggleFeatured : undefined}
+                  />
+                </div>
+              );
+            })}
+          </div>
+
+          <Dialog open={addVideo} onOpenChange={setAddVideo}>
+            <DialogContent
+              className="max-w-sm"
+              data-ocid="classroom.videos.dialog"
+            >
+              <DialogHeader>
+                <DialogTitle>Add Video</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Title</Label>
+                  <Input
+                    value={videoForm.title}
+                    onChange={(e) =>
+                      setVideoForm((f) => ({ ...f, title: e.target.value }))
+                    }
+                    placeholder="Video title"
+                    data-ocid="classroom.videos.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>YouTube URL</Label>
+                  <Input
+                    value={videoForm.url}
+                    onChange={(e) =>
+                      setVideoForm((f) => ({ ...f, url: e.target.value }))
+                    }
+                    placeholder="https://youtube.com/..."
+                    data-ocid="classroom.videos.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Description</Label>
+                  <Textarea
+                    value={videoForm.description}
+                    onChange={(e) =>
+                      setVideoForm((f) => ({
+                        ...f,
+                        description: e.target.value,
+                      }))
+                    }
+                    placeholder="Brief description (2-3 lines)..."
+                    rows={2}
+                    data-ocid="classroom.videos.input"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    id="vid-featured"
+                    checked={videoForm.isFeatured}
+                    onChange={(e) =>
+                      setVideoForm((f) => ({
+                        ...f,
+                        isFeatured: e.target.checked,
+                      }))
+                    }
+                    className="accent-primary"
+                    data-ocid="classroom.videos.checkbox"
+                  />
+                  <Label htmlFor="vid-featured" className="cursor-pointer">
+                    Feature this video
+                  </Label>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={saveVideo}
+                    className="flex-1"
+                    data-ocid="classroom.videos.submit_button"
+                  >
+                    Add
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setAddVideo(false)}
+                    className="flex-1"
+                    data-ocid="classroom.videos.cancel_button"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+
+        {/* ── Class Schedule Tab ──────────────────────────────────────────── */}
+        <TabsContent value="schedule" className="space-y-3">
+          {canEdit && (
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1"
+                onClick={() => setAddSchedule(true)}
+                data-ocid="classroom.schedule.open_modal_button"
+              >
+                <Plus className="w-3 h-3" /> Add Entry
+              </Button>
+            </div>
+          )}
+          {sortedSchedule.length === 0 && (
+            <p
+              className="text-sm text-muted-foreground text-center py-6"
+              data-ocid="classroom.schedule.empty_state"
+            >
+              No schedule entries yet.
+            </p>
+          )}
+          <div className="rounded-xl border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50">
+                  <TableHead className="font-semibold">Day</TableHead>
+                  <TableHead className="font-semibold">Time</TableHead>
+                  <TableHead className="font-semibold">Topic</TableHead>
+                  <TableHead className="font-semibold">Location</TableHead>
+                  <TableHead className="font-semibold w-20">Calendar</TableHead>
+                  {canEdit && (
+                    <TableHead className="font-semibold w-16">Edit</TableHead>
+                  )}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sortedSchedule.map((s: any, displayIdx: number) => {
+                  const realIdx = (cls.schedule as any[]).indexOf(s);
+                  return (
+                    <TableRow
+                      key={s.day + String(realIdx)}
+                      data-ocid={`classroom.schedule.item.${displayIdx + 1}`}
+                    >
+                      {editSchedIdx === realIdx ? (
+                        <TableCell colSpan={canEdit ? 6 : 5}>
+                          <div className="flex flex-wrap gap-2">
+                            <Input
+                              value={editSchedForm.day}
+                              onChange={(e) =>
+                                setEditSchedForm((f) => ({
+                                  ...f,
+                                  day: e.target.value,
+                                }))
+                              }
+                              placeholder="Day"
+                              className="w-24"
+                            />
+                            <Input
+                              value={editSchedForm.time}
+                              onChange={(e) =>
+                                setEditSchedForm((f) => ({
+                                  ...f,
+                                  time: e.target.value,
+                                }))
+                              }
+                              placeholder="Time"
+                              className="w-36"
+                            />
+                            <Input
+                              value={editSchedForm.subject}
+                              onChange={(e) =>
+                                setEditSchedForm((f) => ({
+                                  ...f,
+                                  subject: e.target.value,
+                                }))
+                              }
+                              placeholder="Topic"
+                              className="w-36"
+                            />
+                            <Input
+                              value={editSchedForm.venue}
+                              onChange={(e) =>
+                                setEditSchedForm((f) => ({
+                                  ...f,
+                                  venue: e.target.value,
+                                }))
+                              }
+                              placeholder="Location"
+                              className="w-36"
+                            />
+                            <Button
+                              size="sm"
+                              onClick={saveEditSched}
+                              data-ocid="classroom.schedule.save_button"
+                            >
+                              Save
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditSchedIdx(null)}
+                              data-ocid="classroom.schedule.cancel_button"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </TableCell>
+                      ) : (
+                        <>
+                          <TableCell className="font-medium">{s.day}</TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {s.time}
+                          </TableCell>
+                          <TableCell>{s.subject}</TableCell>
+                          <TableCell className="text-muted-foreground text-sm">
+                            {s.venue}
+                          </TableCell>
+                          <TableCell>
+                            <a
+                              href={buildGCalUrl(s.subject, s.venue, doc.name)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-medium"
+                              data-ocid={`classroom.schedule.calendar.${displayIdx + 1}`}
+                            >
+                              <CalendarDays className="w-3.5 h-3.5" />
+                              <span className="hidden sm:inline">Add</span>
+                            </a>
+                          </TableCell>
+                          {canEdit && (
+                            <TableCell>
+                              <div className="flex gap-1">
+                                <button
+                                  type="button"
+                                  className="p-1 hover:text-primary"
+                                  onClick={() => {
+                                    setEditSchedIdx(realIdx);
+                                    setEditSchedForm(s);
+                                  }}
+                                  data-ocid={`classroom.schedule.edit_button.${displayIdx + 1}`}
+                                >
+                                  <Pencil className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="p-1 hover:text-destructive"
+                                  onClick={() => deleteSched(realIdx)}
+                                  data-ocid={`classroom.schedule.delete_button.${displayIdx + 1}`}
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </TableCell>
+                          )}
+                        </>
+                      )}
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+
+          {/* Add schedule dialog */}
+          <Dialog open={addSchedule} onOpenChange={setAddSchedule}>
+            <DialogContent
+              className="max-w-sm"
+              data-ocid="classroom.schedule.dialog"
+            >
+              <DialogHeader>
+                <DialogTitle>Add Schedule Entry</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label>Day</Label>
+                  <Select
+                    value={schedForm.day}
+                    onValueChange={(v) =>
+                      setSchedForm((f) => ({ ...f, day: v }))
+                    }
+                  >
+                    <SelectTrigger data-ocid="classroom.schedule.select">
+                      <SelectValue placeholder="Select day" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DAY_ORDER.map((d) => (
+                        <SelectItem key={d} value={d}>
+                          {d}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Time</Label>
+                  <Input
+                    value={schedForm.time}
+                    onChange={(e) =>
+                      setSchedForm((f) => ({ ...f, time: e.target.value }))
+                    }
+                    placeholder="e.g., 8:00 AM – 10:00 AM"
+                    data-ocid="classroom.schedule.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Topic</Label>
+                  <Input
+                    value={schedForm.subject}
+                    onChange={(e) =>
+                      setSchedForm((f) => ({ ...f, subject: e.target.value }))
+                    }
+                    placeholder="Subject name"
+                    data-ocid="classroom.schedule.input"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Location</Label>
+                  <Input
+                    value={schedForm.venue}
+                    onChange={(e) =>
+                      setSchedForm((f) => ({ ...f, venue: e.target.value }))
+                    }
+                    placeholder="Lecture Hall / Ward"
+                    data-ocid="classroom.schedule.input"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={saveSched}
+                    className="flex-1"
+                    data-ocid="classroom.schedule.submit_button"
+                  >
+                    Add
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setAddSchedule(false)}
+                    className="flex-1"
+                    data-ocid="classroom.schedule.cancel_button"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
@@ -2198,6 +2628,7 @@ function getYouTubeId(url: string): string | null {
 function VideoThumbnailCard({
   vid,
   idx,
+  displayIdx,
   isAdmin,
   editVideoIdx,
   editVideoForm,
@@ -2205,26 +2636,40 @@ function VideoThumbnailCard({
   setEditVideoForm,
   onSaveEdit,
   onDelete,
+  onToggleFeatured,
 }: {
-  vid: { title: string; url: string; description?: string };
+  vid: {
+    title: string;
+    url: string;
+    description?: string;
+    isFeatured?: boolean;
+  };
   idx: number;
+  displayIdx: number;
   isAdmin: boolean;
   editVideoIdx: number | null;
-  editVideoForm: { title: string; url: string; description: string };
+  editVideoForm: {
+    title: string;
+    url: string;
+    description: string;
+    isFeatured: boolean;
+  };
   setEditVideoIdx: (i: number | null) => void;
   setEditVideoForm: (f: {
     title: string;
     url: string;
     description: string;
+    isFeatured: boolean;
   }) => void;
   onSaveEdit: () => void;
   onDelete: (i: number) => void;
+  onToggleFeatured?: (i: number) => void;
 }) {
   const ytId = getYouTubeId(vid.url);
   return (
     <Card
-      key={vid.title + String(idx)}
-      className="border border-border hover:shadow-md transition-all overflow-hidden"
+      className={`border hover:shadow-md transition-all overflow-hidden ${vid.isFeatured ? "border-amber-400 ring-1 ring-amber-300/50" : "border-border"}`}
+      data-ocid={`classroom.videos.item.${displayIdx + 1}`}
     >
       {editVideoIdx === idx ? (
         <CardContent className="p-4 space-y-1.5">
@@ -2244,7 +2689,7 @@ function VideoThumbnailCard({
             placeholder="YouTube URL"
             className="h-7 text-xs"
           />
-          <Input
+          <Textarea
             value={editVideoForm.description}
             onChange={(e) =>
               setEditVideoForm({
@@ -2252,9 +2697,30 @@ function VideoThumbnailCard({
                 description: e.target.value,
               })
             }
-            placeholder="Description"
-            className="h-7 text-xs"
+            placeholder="Description (2-3 lines)..."
+            rows={2}
+            className="text-xs"
           />
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id={`vid-feat-${idx}`}
+              checked={editVideoForm.isFeatured}
+              onChange={(e) =>
+                setEditVideoForm({
+                  ...editVideoForm,
+                  isFeatured: e.target.checked,
+                })
+              }
+              className="accent-amber-500"
+            />
+            <label
+              htmlFor={`vid-feat-${idx}`}
+              className="text-xs cursor-pointer"
+            >
+              Featured
+            </label>
+          </div>
           <div className="flex gap-1">
             <Button
               size="sm"
@@ -2306,21 +2772,39 @@ function VideoThumbnailCard({
                 </svg>
               </div>
             </div>
+            {vid.isFeatured && (
+              <div className="absolute top-2 left-2 bg-amber-400 text-amber-900 text-[10px] font-bold px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                ⭐ Featured
+              </div>
+            )}
           </a>
           <CardContent className="p-3">
             <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
+              <div className="min-w-0 flex-1">
                 <p className="font-medium text-sm text-foreground truncate">
                   {vid.title}
                 </p>
                 {vid.description && (
-                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-2">
+                  <p className="text-xs text-muted-foreground mt-0.5 line-clamp-3">
                     {vid.description}
                   </p>
                 )}
               </div>
               {isAdmin && (
                 <div className="flex items-center gap-1 shrink-0">
+                  {onToggleFeatured && (
+                    <button
+                      type="button"
+                      title={vid.isFeatured ? "Unfeature" : "Feature"}
+                      className={`p-0.5 transition-colors ${vid.isFeatured ? "text-amber-500" : "hover:text-amber-500"}`}
+                      onClick={() => onToggleFeatured(idx)}
+                      data-ocid={`classroom.videos.toggle.${displayIdx + 1}`}
+                    >
+                      <span className="text-sm">
+                        {vid.isFeatured ? "⭐" : "☆"}
+                      </span>
+                    </button>
+                  )}
                   <button
                     type="button"
                     className="p-0.5 hover:text-primary"
@@ -2330,9 +2814,10 @@ function VideoThumbnailCard({
                         title: vid.title,
                         url: vid.url,
                         description: vid.description || "",
+                        isFeatured: vid.isFeatured || false,
                       });
                     }}
-                    data-ocid={`classroom.videos.edit_button.${idx + 1}`}
+                    data-ocid={`classroom.videos.edit_button.${displayIdx + 1}`}
                   >
                     <Pencil className="w-3.5 h-3.5" />
                   </button>
@@ -2340,7 +2825,7 @@ function VideoThumbnailCard({
                     type="button"
                     className="p-0.5 hover:text-destructive"
                     onClick={() => onDelete(idx)}
-                    data-ocid={`classroom.videos.delete_button.${idx + 1}`}
+                    data-ocid={`classroom.videos.delete_button.${displayIdx + 1}`}
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

@@ -62,12 +62,20 @@ import { motion } from "motion/react";
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import AIAssistantPanel from "../components/AIAssistantPanel";
+import HistoryFeaturesPanel from "../components/HistoryFeatures";
 import NewPrescriptionMode from "../components/NewPrescriptionMode";
 import PatientForm from "../components/PatientForm";
+import {
+  CurrentMedicationList,
+  FirstPrescriptionLabel,
+  PrescriptionDiffRow,
+  ViewedByPatientBadge,
+} from "../components/PrescriptionEnhancements";
 import PrescriptionForm from "../components/PrescriptionForm";
 import PrescriptionPad from "../components/PrescriptionPad";
 import UpgradedPrescriptionEMR from "../components/UpgradedPrescriptionEMR";
 import VisitForm from "../components/VisitForm";
+import { loadFamilyHistoryRisk } from "../components/patientDashboardTypes";
 import { useAdminAuth } from "../hooks/useAdminAuth";
 import { useEmailAuth } from "../hooks/useEmailAuth";
 import { loadRegistry } from "../hooks/useEmailAuth";
@@ -544,6 +552,46 @@ function OverviewTab({
           </div>
         </div>
       )}
+
+      {/* Family History Risk Summary */}
+      {(() => {
+        const email = getDoctorEmail();
+        const risk = loadFamilyHistoryRisk(email, patientId.toString());
+        if (!risk) return null;
+        const active: string[] = [];
+        if (risk.diabetes) active.push("Diabetes");
+        if (risk.hypertension) active.push("Hypertension");
+        if (risk.ihd) active.push("IHD");
+        if (risk.cancer) active.push("Cancer");
+        if (risk.stroke) active.push("Stroke");
+        if (active.length === 0) return null;
+        return (
+          <div
+            className="bg-amber-50 border border-amber-200 rounded-xl p-4"
+            data-ocid="patient_profile.family_risk_section"
+          >
+            <h3 className="font-semibold text-sm flex items-center gap-2 mb-2 text-amber-800">
+              <ShieldAlert className="w-4 h-4 text-amber-600" />
+              Family History Risk
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {active.map((r) => (
+                <span
+                  key={r}
+                  className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2.5 py-1 text-xs font-semibold"
+                >
+                  🔴 {r}
+                </span>
+              ))}
+            </div>
+            {risk.additionalNotes && (
+              <p className="text-xs text-amber-700 mt-2 italic">
+                {risk.additionalNotes}
+              </p>
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -1955,6 +2003,21 @@ export default function PatientProfile() {
             )}
           </div>
 
+          {/* ── HISTORY FEATURES: Problem List, Complaint Trend, Compare Visits, Vaccinations ── */}
+          {patientId && (
+            <HistoryFeaturesPanel
+              visits={visits}
+              patient={patient}
+              isDoctor={
+                !isAdmin
+                  ? role === "consultant_doctor" ||
+                    role === "doctor" ||
+                    role === "medical_officer"
+                  : true
+              }
+            />
+          )}
+
           {/* PRESCRIPTIONS SECTION */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
             <div className="flex items-center justify-between mb-3">
@@ -2028,19 +2091,43 @@ export default function PatientProfile() {
               </div>
             ) : (
               <div className="space-y-2">
+                {/* Current Medication List */}
+                <CurrentMedicationList prescriptions={prescriptions} />
+
                 {prescriptions
                   .slice()
                   .sort((a, b) =>
                     Number(b.prescriptionDate - a.prescriptionDate),
                   )
-                  .map((rx, idx) => (
-                    <PrescriptionCard
-                      key={rx.id.toString()}
-                      rx={rx}
-                      index={idx}
-                      onClick={() => setSelectedRx(rx)}
-                    />
-                  ))}
+                  .map((rx, idx, arr) => {
+                    const prev = arr[idx + 1];
+                    const rxExt = rx as Prescription & {
+                      viewedByPatientAt?: number;
+                    };
+                    return (
+                      <div key={rx.id.toString()}>
+                        {idx === arr.length - 1 ? (
+                          <FirstPrescriptionLabel />
+                        ) : (
+                          prev && (
+                            <PrescriptionDiffRow
+                              curr={rx}
+                              prev={prev}
+                              index={idx}
+                            />
+                          )
+                        )}
+                        <PrescriptionCard
+                          rx={rx}
+                          index={idx}
+                          onClick={() => setSelectedRx(rx)}
+                        />
+                        <ViewedByPatientBadge
+                          viewedAt={rxExt.viewedByPatientAt}
+                        />
+                      </div>
+                    );
+                  })}
               </div>
             )}
           </div>
@@ -2356,6 +2443,29 @@ export default function PatientProfile() {
           </DialogHeader>
           {selectedRx && (
             <div className="space-y-4 text-sm">
+              {/* Snapshot lock indicator */}
+              {(() => {
+                const snap = (selectedRx as Record<string, unknown>)
+                  .finalizedSnapshot as Record<string, unknown> | undefined;
+                if (snap?.lockedAt) {
+                  return (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-200 text-xs text-emerald-800">
+                      <span>🔒</span>
+                      <span>
+                        Clinical summary locked at{" "}
+                        <strong>
+                          {format(
+                            new Date(snap.lockedAt as number),
+                            "d MMM yyyy, HH:mm",
+                          )}
+                        </strong>{" "}
+                        — cannot be changed retroactively
+                      </span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2 text-muted-foreground">
                   <Clock className="w-4 h-4" />

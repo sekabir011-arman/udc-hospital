@@ -55,15 +55,22 @@ import {
 import type { DoctorAccount, PatientAccount } from "./hooks/useEmailAuth";
 import { useMigration } from "./hooks/useMigration";
 import { setCanisterActor } from "./hooks/useQueries";
+import AppointmentPayment from "./pages/AppointmentPayment";
 import Appointments from "./pages/Appointments";
 import AuditLog from "./pages/AuditLog";
 import BedManagement from "./pages/BedManagement";
 import Dashboard from "./pages/Dashboard";
+import EmergencyPrescription from "./pages/EmergencyPrescription";
+import InvestigationPaymentPage from "./pages/InvestigationPaymentPage";
 import LandingPage from "./pages/LandingPage";
+import OtherPayment from "./pages/OtherPayment";
 import PatientDashboard from "./pages/PatientDashboard";
 import Patients from "./pages/Patients";
+import ProcedurePayment from "./pages/ProcedurePayment";
 import SerialDisplay from "./pages/SerialDisplay";
 import Settings from "./pages/Settings";
+import Staff from "./pages/Staff";
+import TotalIncome from "./pages/TotalIncome";
 import VisitPage from "./pages/VisitPage";
 import WardRound from "./pages/WardRound";
 import { STAFF_ROLE_LABELS } from "./types";
@@ -142,6 +149,41 @@ const visitRoute = createRoute({
   path: "/Visit",
   component: VisitPage,
 });
+const emergencyPrescriptionRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/EmergencyPrescription",
+  component: EmergencyPrescription,
+});
+const staffRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/Staff",
+  component: Staff,
+});
+const appointmentPaymentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/AppointmentPayment",
+  component: AppointmentPayment,
+});
+const investigationPaymentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/InvestigationPayment",
+  component: InvestigationPaymentPage,
+});
+const procedurePaymentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/ProcedurePayment",
+  component: ProcedurePayment,
+});
+const totalIncomeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/TotalIncome",
+  component: TotalIncome,
+});
+const otherPaymentRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/OtherPayment",
+  component: OtherPayment,
+});
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
@@ -154,6 +196,13 @@ const routeTree = rootRoute.addChildren([
   wardRoundRoute,
   bedManagementRoute,
   visitRoute,
+  emergencyPrescriptionRoute,
+  staffRoute,
+  appointmentPaymentRoute,
+  investigationPaymentRoute,
+  procedurePaymentRoute,
+  totalIncomeRoute,
+  otherPaymentRoute,
 ]);
 const router = createRouter({ routeTree });
 

@@ -1,3 +1,4 @@
+import { ClassroomSettings } from "@/components/ClassroomSettings";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,11 +38,15 @@ import {
   LogOut,
   MapPin,
   MonitorPlay,
+  Pencil,
+  Plus,
+  ReceiptText,
   Save,
   Settings2,
   Shield,
   Stethoscope,
   TestTube,
+  Trash2,
   Upload,
   User,
   UserCheck,
@@ -50,6 +55,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { loadInvestigationRates } from "../components/InvestigationPayment";
 import { useAdminAuth } from "../hooks/useAdminAuth";
 import {
   type DoctorAccount,
@@ -61,6 +67,7 @@ import {
   saveRegistry,
   useEmailAuth,
 } from "../hooks/useEmailAuth";
+import type { InvestigationRate } from "../types";
 import { STAFF_ROLE_LABELS, type StaffRole } from "../types";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -959,6 +966,404 @@ function AdminPublicContent() {
               Save
             </Button>
           </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// ── ADMIN INVESTIGATION RATES ─────────────────────────────────────────────────
+
+const RATES_KEY = "investigation_rates";
+
+function saveRates(rates: InvestigationRate[]) {
+  localStorage.setItem(RATES_KEY, JSON.stringify(rates));
+}
+
+function AdminInvestigationRates() {
+  const [rates, setRates] = useState<InvestigationRate[]>(() =>
+    loadInvestigationRates(),
+  );
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editRate, setEditRate] = useState("");
+  const [editDiscount, setEditDiscount] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newRate, setNewRate] = useState("");
+  const [newDiscount, setNewDiscount] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  function persistRates(updated: InvestigationRate[]) {
+    setRates(updated);
+    saveRates(updated);
+  }
+
+  function handleDelete(id: string) {
+    persistRates(rates.filter((r) => r.id !== id));
+    toast.success("Deleted");
+  }
+
+  function startEdit(r: InvestigationRate) {
+    setEditingId(r.id);
+    setEditName(r.name);
+    setEditRate(String(r.rate));
+    setEditDiscount(String(r.discountRate ?? 0));
+  }
+
+  function saveEdit(id: string) {
+    const rateNum = Number(editRate);
+    if (!editName.trim() || Number.isNaN(rateNum) || rateNum < 0) {
+      toast.error("Name and valid rate required");
+      return;
+    }
+    persistRates(
+      rates.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              name: editName.trim(),
+              rate: rateNum,
+              discountRate: Number(editDiscount) || 0,
+            }
+          : r,
+      ),
+    );
+    setEditingId(null);
+    toast.success("Saved");
+  }
+
+  function handleAddManual() {
+    const rateNum = Number(newRate);
+    if (!newName.trim() || Number.isNaN(rateNum) || rateNum < 0) {
+      toast.error("Enter investigation name and rate");
+      return;
+    }
+    const entry: InvestigationRate = {
+      id: Date.now().toString(36) + Math.random().toString(36).slice(2),
+      name: newName.trim(),
+      rate: rateNum,
+      discountRate: Number(newDiscount) || 0,
+    };
+    persistRates([...rates, entry]);
+    setNewName("");
+    setNewRate("");
+    setNewDiscount("");
+    toast.success("Investigation added");
+  }
+
+  function handleExcelUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const data = ev.target?.result;
+        // Try SheetJS first, fall back to CSV parsing
+        let parsed: { name: string; rate: number }[] = [];
+
+        if (file.name.endsWith(".xlsx") || file.name.endsWith(".xls")) {
+          // Excel files cannot be parsed without the xlsx package (not installed).
+          // Instruct the user to save as CSV instead.
+          toast.error(
+            "Excel (.xlsx/.xls) cannot be parsed directly. Please save the file as CSV first (File → Save As → CSV), then upload again.",
+          );
+          setUploading(false);
+          if (fileRef.current) fileRef.current.value = "";
+          return;
+        }
+        // CSV / TSV plain-text fallback
+        const text =
+          typeof data === "string"
+            ? data
+            : new TextDecoder().decode(data as ArrayBuffer);
+        const lines = text.split(/\r?\n/);
+        for (const line of lines) {
+          const parts = line.split(/[,\t]/);
+          const name = (parts[0] ?? "").trim();
+          const rate = Number((parts[1] ?? "").trim());
+          if (!name || Number.isNaN(rate) || rate < 0) continue;
+          parsed.push({ name, rate });
+        }
+
+        if (parsed.length === 0) {
+          toast.error(
+            "No valid rows found. Ensure Column A = Name, Column B = Rate.",
+          );
+          setUploading(false);
+          return;
+        }
+
+        const newRates: InvestigationRate[] = parsed.map((p) => ({
+          id:
+            Date.now().toString(36) +
+            Math.random().toString(36).slice(2) +
+            Math.random().toString(36).slice(2),
+          name: p.name,
+          rate: p.rate,
+          discountRate: 0,
+        }));
+
+        // Merge: preserve existing entries, add new ones (skip duplicates by name)
+        const existingNames = new Set(rates.map((r) => r.name.toLowerCase()));
+        const toAdd = newRates.filter(
+          (r) => !existingNames.has(r.name.toLowerCase()),
+        );
+        const merged = [...rates, ...toAdd];
+        persistRates(merged);
+        toast.success(
+          `${toAdd.length} new investigation${toAdd.length !== 1 ? "s" : ""} loaded (${parsed.length - toAdd.length} skipped as duplicates)`,
+        );
+      } catch {
+        toast.error("Failed to parse file");
+      } finally {
+        setUploading(false);
+        if (fileRef.current) fileRef.current.value = "";
+      }
+    };
+
+    reader.readAsText(file);
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Upload card */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ReceiptText className="w-4 h-4 text-purple-600" />
+            Investigation Rate List
+          </CardTitle>
+          <CardDescription>
+            Upload a CSV file (Column A = Investigation Name, Column B = Rate).
+            Existing entries are preserved.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-wrap gap-2 items-center">
+            <Button
+              variant="outline"
+              className="gap-1.5"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploading}
+              data-ocid="admin.inv_rates.upload_button"
+            >
+              <Upload className="w-4 h-4" />
+              {uploading ? "Parsing…" : "Upload CSV File"}
+            </Button>
+            <span className="text-xs text-muted-foreground">
+              .csv or .tsv — Column A: Name, Column B: Rate
+            </span>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,.tsv,.txt"
+              className="hidden"
+              onChange={handleExcelUpload}
+            />
+          </div>
+
+          {/* Manual add row */}
+          <div className="flex gap-2 items-end flex-wrap">
+            <div className="space-y-1 flex-1 min-w-[140px]">
+              <Label className="text-xs">Investigation Name</Label>
+              <Input
+                placeholder="e.g. CBC"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="h-8 text-sm"
+                data-ocid="admin.inv_rates.name.input"
+              />
+            </div>
+            <div className="space-y-1 w-28">
+              <Label className="text-xs">Rate (৳)</Label>
+              <Input
+                type="number"
+                min={0}
+                placeholder="0"
+                value={newRate}
+                onChange={(e) => setNewRate(e.target.value)}
+                className="h-8 text-sm"
+                data-ocid="admin.inv_rates.rate.input"
+              />
+            </div>
+            <div className="space-y-1 w-24">
+              <Label className="text-xs">Discount (%)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                placeholder="0"
+                value={newDiscount}
+                onChange={(e) => setNewDiscount(e.target.value)}
+                className="h-8 text-sm"
+                data-ocid="admin.inv_rates.discount.input"
+              />
+            </div>
+            <Button
+              size="sm"
+              className="gap-1.5 h-8 shrink-0"
+              onClick={handleAddManual}
+              data-ocid="admin.inv_rates.add_button"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Rates table */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <FlaskConical className="w-4 h-4 text-teal-600" />
+            Rate List
+            {rates.length > 0 && (
+              <Badge className="bg-purple-100 text-purple-800 border-purple-200 text-xs ml-1">
+                {rates.length} total
+              </Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {rates.length === 0 ? (
+            <p
+              className="text-sm text-muted-foreground text-center py-8"
+              data-ocid="admin.inv_rates.empty_state"
+            >
+              No rates configured yet. Upload an Excel file or add manually.
+            </p>
+          ) : (
+            <div className="rounded-xl border border-border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-muted/50 border-b border-border">
+                    <th className="text-left px-4 py-2.5 font-semibold text-muted-foreground text-xs">
+                      #
+                    </th>
+                    <th className="text-left px-4 py-2.5 font-semibold text-muted-foreground text-xs">
+                      Investigation Name
+                    </th>
+                    <th className="text-right px-4 py-2.5 font-semibold text-muted-foreground text-xs">
+                      Rate (৳)
+                    </th>
+                    <th className="text-right px-4 py-2.5 font-semibold text-muted-foreground text-xs hidden sm:table-cell">
+                      Discount (%)
+                    </th>
+                    <th className="text-right px-4 py-2.5 font-semibold text-muted-foreground text-xs">
+                      Actions
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rates.map((r, idx) => (
+                    <tr
+                      key={r.id}
+                      className="border-b border-border last:border-0 hover:bg-muted/20 transition-colors"
+                      data-ocid={`admin.inv_rates.item.${idx + 1}`}
+                    >
+                      <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                        {idx + 1}
+                      </td>
+                      {editingId === r.id ? (
+                        <>
+                          <td className="px-4 py-2">
+                            <Input
+                              value={editName}
+                              onChange={(e) => setEditName(e.target.value)}
+                              className="h-7 text-sm"
+                              data-ocid={`admin.inv_rates.edit_name.${idx + 1}`}
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <Input
+                              type="number"
+                              min={0}
+                              value={editRate}
+                              onChange={(e) => setEditRate(e.target.value)}
+                              className="h-7 text-sm text-right w-24 ml-auto"
+                              data-ocid={`admin.inv_rates.edit_rate.${idx + 1}`}
+                            />
+                          </td>
+                          <td className="px-4 py-2 hidden sm:table-cell">
+                            <Input
+                              type="number"
+                              min={0}
+                              max={100}
+                              value={editDiscount}
+                              onChange={(e) => setEditDiscount(e.target.value)}
+                              className="h-7 text-sm text-right w-20 ml-auto"
+                              data-ocid={`admin.inv_rates.edit_discount.${idx + 1}`}
+                            />
+                          </td>
+                          <td className="px-4 py-2">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                size="sm"
+                                className="h-7 px-2 text-xs gap-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+                                onClick={() => saveEdit(r.id)}
+                                data-ocid={`admin.inv_rates.save_button.${idx + 1}`}
+                              >
+                                <Save className="w-3 h-3" />
+                                Save
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-xs"
+                                onClick={() => setEditingId(null)}
+                                data-ocid={`admin.inv_rates.cancel_button.${idx + 1}`}
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <>
+                          <td className="px-4 py-2.5 font-medium text-foreground">
+                            {r.name}
+                          </td>
+                          <td className="px-4 py-2.5 text-right font-semibold text-foreground">
+                            ৳ {r.rate.toLocaleString("en-BD")}
+                          </td>
+                          <td className="px-4 py-2.5 text-right text-muted-foreground hidden sm:table-cell">
+                            {r.discountRate ? `${r.discountRate}%` : "—"}
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center justify-end gap-1">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-7 px-2 text-xs gap-1"
+                                onClick={() => startEdit(r)}
+                                data-ocid={`admin.inv_rates.edit_button.${idx + 1}`}
+                              >
+                                <Pencil className="w-3 h-3" />
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
+                                onClick={() => handleDelete(r.id)}
+                                data-ocid={`admin.inv_rates.delete_button.${idx + 1}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>
@@ -2025,6 +2430,14 @@ export default function Settings() {
               <Database className="w-3.5 h-3.5" />
               System & Audit
             </TabsTrigger>
+            <TabsTrigger
+              value="inv_rates"
+              className="gap-1.5 text-xs sm:text-sm"
+              data-ocid="settings.admin.inv_rates.tab"
+            >
+              <ReceiptText className="w-3.5 h-3.5" />
+              Investigation Rates
+            </TabsTrigger>
           </TabsList>
           <TabsContent value="users">
             <AdminUserManagement />
@@ -2037,6 +2450,9 @@ export default function Settings() {
           </TabsContent>
           <TabsContent value="system">
             <AdminSystemSettings onLogout={adminLogout} />
+          </TabsContent>
+          <TabsContent value="inv_rates">
+            <AdminInvestigationRates />
           </TabsContent>
         </Tabs>
         <Footer />
@@ -2149,6 +2565,14 @@ export default function Settings() {
             >
               <Bell className="w-3.5 h-3.5" />
               Notifications
+            </TabsTrigger>
+            <TabsTrigger
+              value="classroom"
+              className="flex-1 gap-1.5 text-xs sm:text-sm"
+              data-ocid="settings.doctor.classroom.tab"
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              Classroom
             </TabsTrigger>
             <TabsTrigger
               value="account"
@@ -2287,6 +2711,9 @@ export default function Settings() {
           </TabsContent>
           <TabsContent value="notifications">
             <NotificationPrefs storageKey={notifKey} />
+          </TabsContent>
+          <TabsContent value="classroom">
+            <ClassroomSettings doctorEmail={currentDoctor?.email ?? ""} />
           </TabsContent>
           <TabsContent value="account">
             <AccountPanel

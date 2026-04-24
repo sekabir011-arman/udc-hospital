@@ -347,8 +347,24 @@ export default function PatientDashboard({
     win.print();
   }
 
+  /** Mark a prescription as viewed by patient — stores viewedByPatientAt in localStorage */
+  function markPrescriptionViewed(rxId: bigint) {
+    try {
+      const key = `rx_viewed_by_patient_${String(rxId)}`;
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, String(Date.now()));
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
   function downloadSinglePrescriptionPDF(rx: Prescription) {
     if (!patient) return;
+    // Mark as viewed by patient
+    if (currentRole === "patient") {
+      markPrescriptionViewed(rx.id);
+    }
     const meds = rx.medications
       .map((m, i) => {
         const line1 =
@@ -512,6 +528,21 @@ export default function PatientDashboard({
     Number(b.prescriptionDate - a.prescriptionDate),
   );
   const latestPrescription = sortedPrescriptions[0] ?? null;
+
+  // Merge viewedByPatientAt from localStorage into each prescription
+  const prescriptionsWithMeta = prescriptions.map((rx) => {
+    try {
+      const viewedAt = localStorage.getItem(
+        `rx_viewed_by_patient_${String(rx.id)}`,
+      );
+      if (viewedAt) {
+        return { ...rx, viewedByPatientAt: Number(viewedAt) };
+      }
+    } catch {
+      /* ignore */
+    }
+    return rx;
+  });
 
   // For MO / Intern / Nurse: clinical actions are restricted if patient is not admitted
   const clinicalRestricted =
@@ -720,7 +751,7 @@ export default function PatientDashboard({
             vitalsHistory={vitalsHistory}
             allInvestigations={allInvestigations}
             invByName={invByName}
-            prescriptions={prescriptions}
+            prescriptions={prescriptionsWithMeta as typeof prescriptions}
             loadingVisits={loadingVisits}
             loadingRx={loadingRx}
             setShowVisitForm={(v) => {

@@ -3,7 +3,16 @@
  * Extracted to keep PatientDashboard.tsx and pages/PatientDashboard.tsx DRY.
  */
 
+import type {
+  AllergyOverrideRecord,
+  FamilyHistoryRisk,
+  VaccinationRecord,
+} from "../types";
+
 const PATIENT_SUBMISSIONS_KEY = "medicare_patient_submissions";
+const VACCINATION_KEY_PREFIX = "vaccination_";
+const FAMILY_HISTORY_RISK_KEY_PREFIX = "family_history_risk_";
+const ALLERGY_OVERRIDES_KEY_PREFIX = "allergy_overrides_";
 
 export interface PatientSubmission {
   id: string;
@@ -153,4 +162,73 @@ export function saveProblemList(
 ): void {
   const key = `${PROBLEM_LIST_KEY_PREFIX}${doctorEmail}_${patientId}`;
   localStorage.setItem(key, JSON.stringify(items));
+}
+
+// ── Vaccination Records ───────────────────────────────────────────────────────
+
+export function loadVaccinationRecords(
+  doctorEmail: string,
+  patientId: string,
+): VaccinationRecord[] {
+  try {
+    const key = `${VACCINATION_KEY_PREFIX}${doctorEmail}_${patientId}`;
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw) as VaccinationRecord[];
+  } catch {}
+  return [];
+}
+
+export function saveVaccinationRecords(
+  doctorEmail: string,
+  patientId: string,
+  records: VaccinationRecord[],
+): void {
+  const key = `${VACCINATION_KEY_PREFIX}${doctorEmail}_${patientId}`;
+  localStorage.setItem(key, JSON.stringify(records));
+}
+
+// ── Family History Risk ───────────────────────────────────────────────────────
+
+export function loadFamilyHistoryRisk(
+  doctorEmail: string,
+  patientId: string,
+): FamilyHistoryRisk | null {
+  try {
+    const key = `${FAMILY_HISTORY_RISK_KEY_PREFIX}${doctorEmail}_${patientId}`;
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw) as FamilyHistoryRisk;
+  } catch {}
+  return null;
+}
+
+export function saveFamilyHistoryRisk(
+  doctorEmail: string,
+  patientId: string,
+  risk: FamilyHistoryRisk,
+): void {
+  const key = `${FAMILY_HISTORY_RISK_KEY_PREFIX}${doctorEmail}_${patientId}`;
+  localStorage.setItem(key, JSON.stringify(risk));
+}
+
+// ── Allergy Override Records ──────────────────────────────────────────────────
+
+export function loadAllergyOverrides(
+  doctorEmail: string,
+  patientId: string,
+): AllergyOverrideRecord[] {
+  try {
+    const key = `${ALLERGY_OVERRIDES_KEY_PREFIX}${doctorEmail}_${patientId}`;
+    const raw = localStorage.getItem(key);
+    if (raw) return JSON.parse(raw) as AllergyOverrideRecord[];
+  } catch {}
+  return [];
+}
+
+export function saveAllergyOverrides(
+  doctorEmail: string,
+  patientId: string,
+  overrides: AllergyOverrideRecord[],
+): void {
+  const key = `${ALLERGY_OVERRIDES_KEY_PREFIX}${doctorEmail}_${patientId}`;
+  localStorage.setItem(key, JSON.stringify(overrides));
 }

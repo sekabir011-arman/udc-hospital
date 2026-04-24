@@ -62,7 +62,7 @@ import {
   useEmailAuth,
 } from "../hooks/useEmailAuth";
 import type { PatientAccount } from "../hooks/useEmailAuth";
-import { getVisitFormData } from "../hooks/useQueries";
+import { getDoctorEmail, getVisitFormData } from "../hooks/useQueries";
 import {
   useGetClinicalNotesByPatient,
   useGetEncountersByPatient,
@@ -92,6 +92,8 @@ import DailyProgress from "./DailyProgress";
 import DailyProgressNote from "./DailyProgressNote";
 import DischargeSummaryTab from "./DischargeSummaryTab";
 import HandoverSystem from "./HandoverSystem";
+import HistoryFeaturesPanel from "./HistoryFeatures";
+import InvestigationPayment from "./InvestigationPayment";
 import InvestigationTracker, {
   generateAIInterpretation,
   loadTrackedInvestigations,
@@ -99,6 +101,12 @@ import InvestigationTracker, {
 } from "./InvestigationTracker";
 import MissedDoseReport from "./MissedDoseReport";
 import PatientChat from "./PatientChat";
+import {
+  CurrentMedicationList,
+  FirstPrescriptionLabel,
+  PrescriptionDiffRow,
+  ViewedByPatientBadge,
+} from "./PrescriptionEnhancements";
 import type {
   AdviceEntry,
   ComplaintEntry,
@@ -108,6 +116,7 @@ import type {
 import {
   loadAdviceEntries,
   loadComplaints,
+  loadFamilyHistoryRisk,
   loadSubmissions,
   saveAdviceEntries,
   saveComplaints,
@@ -2413,6 +2422,12 @@ export default function PatientDashboardInner({
           currentRole !== "doctor" &&
           currentRole !== "admin"),
     },
+    {
+      value: "inv_payment",
+      label: t("🧾 Inv. Payment", "🧾 তদন্ত বিল"),
+      activeClass: "data-[state=active]:bg-purple-600",
+      hidden: currentRole === "patient",
+    },
   ];
 
   return (
@@ -2783,6 +2798,45 @@ export default function PatientDashboardInner({
                 height={patient.height}
               />
             </div>
+
+            {/* Family History Risk Card */}
+            {(() => {
+              const email = getDoctorEmail();
+              const risk = loadFamilyHistoryRisk(email, patientId.toString());
+              if (!risk) return null;
+              const active: string[] = [];
+              if (risk.diabetes) active.push("Diabetes");
+              if (risk.hypertension) active.push("Hypertension");
+              if (risk.ihd) active.push("IHD");
+              if (risk.cancer) active.push("Cancer");
+              if (risk.stroke) active.push("Stroke");
+              if (active.length === 0) return null;
+              return (
+                <div
+                  className="bg-amber-50 border border-amber-200 rounded-xl p-4"
+                  data-ocid="patient_dashboard.family_risk_section"
+                >
+                  <h3 className="font-semibold text-amber-800 mb-2 flex items-center gap-2 text-sm">
+                    🧬 Family History Risk
+                  </h3>
+                  <div className="flex flex-wrap gap-2">
+                    {active.map((r) => (
+                      <span
+                        key={r}
+                        className="inline-flex items-center gap-1 bg-amber-100 text-amber-800 border border-amber-300 rounded-full px-2.5 py-1 text-xs font-semibold"
+                      >
+                        🔴 {r}
+                      </span>
+                    ))}
+                  </div>
+                  {risk.additionalNotes && (
+                    <p className="text-xs text-amber-700 mt-2 italic">
+                      {risk.additionalNotes}
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Pregnancy Card */}
             {patient.gender === "female" &&
@@ -3448,6 +3502,13 @@ export default function PatientDashboardInner({
                 />
               )}
             </div>
+
+            {/* ── History Features: Problem List, Complaint Trend, Compare Visits, Vaccinations ── */}
+            <HistoryFeaturesPanel
+              visits={sortedVisits}
+              patient={patient}
+              isDoctor={currentRole === "doctor" || currentRole === "admin"}
+            />
           </TabsContent>
 
           {/* ── PRESCRIPTIONS ── */}
@@ -3500,116 +3561,163 @@ export default function PatientDashboardInner({
                 </div>
               ) : (
                 <div className="space-y-2">
+                  {/* Current Medication List */}
+                  <CurrentMedicationList prescriptions={prescriptions} />
+
                   {[...prescriptions]
                     .sort((a, b) =>
                       Number(b.prescriptionDate - a.prescriptionDate),
                     )
-                    .map((rx, idx) => (
-                      <div
-                        key={rx.id.toString()}
-                        className="bg-card border border-border rounded-xl p-3 hover:shadow-sm transition-all"
-                        data-ocid={`patient_dashboard.prescriptions.item.${idx + 1}`}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
-                            <FileText className="w-3.5 h-3.5 text-indigo-600" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium truncate">
-                              {rx.diagnosis ?? "Prescription"}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              {formatTime(rx.prescriptionDate)}
-                              <span className="ml-2">
-                                {rx.medications.length} med
-                                {rx.medications.length !== 1 ? "s" : ""}
-                              </span>
-                            </p>
-                          </div>
-                          {(currentRole === "doctor" ||
-                            currentRole === "admin") && (
-                            <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                              {permissions.canEditClinical && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-7 px-2 text-xs gap-1 border-amber-300 text-amber-700"
-                                  onClick={() => setEditRx(rx)}
-                                  data-ocid={`patient_dashboard.prescriptions.edit_button.${idx + 1}`}
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                  Edit
-                                </Button>
+                    .map((rx, idx, arr) => {
+                      const prev = arr[idx + 1];
+                      const rxExt = rx as Prescription & {
+                        viewedByPatientAt?: number;
+                      };
+                      return (
+                        <div key={rx.id.toString()}>
+                          {idx === arr.length - 1 ? (
+                            <FirstPrescriptionLabel />
+                          ) : (
+                            prev && (
+                              <PrescriptionDiffRow
+                                curr={rx}
+                                prev={prev}
+                                index={idx}
+                              />
+                            )
+                          )}
+                          <div
+                            className={`bg-card border rounded-xl p-3 hover:shadow-sm transition-all ${
+                              (
+                                rx as Prescription & {
+                                  prescriptionType?: string;
+                                }
+                              ).prescriptionType === "emergency"
+                                ? "border-l-4 border-l-red-500 border-red-200"
+                                : "border-border"
+                            }`}
+                            data-ocid={`patient_dashboard.prescriptions.item.${idx + 1}`}
+                          >
+                            <div className="flex items-center gap-3">
+                              <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center flex-shrink-0">
+                                <FileText className="w-3.5 h-3.5 text-indigo-600" />
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  {(
+                                    rx as Prescription & {
+                                      prescriptionType?: string;
+                                    }
+                                  ).prescriptionType === "emergency" && (
+                                    <span className="inline-flex items-center gap-0.5 bg-red-100 text-red-700 border border-red-200 rounded-full px-2 py-0.5 text-[10px] font-bold leading-none">
+                                      🚨 EMERGENCY
+                                    </span>
+                                  )}
+                                  <p className="text-sm font-medium truncate">
+                                    {rx.diagnosis ?? "Prescription"}
+                                  </p>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                                  <Clock className="w-3 h-3" />
+                                  {formatTime(rx.prescriptionDate)}
+                                  <span className="ml-2">
+                                    {rx.medications.length} med
+                                    {rx.medications.length !== 1 ? "s" : ""}
+                                  </span>
+                                </p>
+                              </div>
+                              {(currentRole === "doctor" ||
+                                currentRole === "admin") && (
+                                <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                                  {permissions.canEditClinical && (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      className="h-7 px-2 text-xs gap-1 border-amber-300 text-amber-700"
+                                      onClick={() => setEditRx(rx)}
+                                      data-ocid={`patient_dashboard.prescriptions.edit_button.${idx + 1}`}
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                      Edit
+                                    </Button>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-xs gap-1 border-blue-300 text-blue-700"
+                                    onClick={() => setSelectedRx(rx)}
+                                    data-ocid={`patient_dashboard.prescriptions.secondary_button.${idx + 1}`}
+                                  >
+                                    <FileText className="w-3 h-3" />
+                                    View
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-xs gap-1 border-green-300 text-green-700"
+                                    onClick={() => {
+                                      setPadPrescription(rx);
+                                      setShowPadPreview(true);
+                                      loadSavedPads();
+                                    }}
+                                    data-ocid={`patient_dashboard.prescriptions.open_modal_button.${idx + 1}`}
+                                  >
+                                    <Printer className="w-3 h-3" />
+                                    Pad
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-xs gap-1 border-purple-300 text-purple-700"
+                                    onClick={() =>
+                                      downloadSinglePrescriptionPDF(rx)
+                                    }
+                                    data-ocid={`patient_dashboard.prescriptions.button.${idx + 1}`}
+                                  >
+                                    <Download className="w-3 h-3" />
+                                    PDF
+                                  </Button>
+                                </div>
                               )}
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2 text-xs gap-1 border-blue-300 text-blue-700"
-                                onClick={() => setSelectedRx(rx)}
-                                data-ocid={`patient_dashboard.prescriptions.secondary_button.${idx + 1}`}
-                              >
-                                <FileText className="w-3 h-3" />
-                                View
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2 text-xs gap-1 border-green-300 text-green-700"
-                                onClick={() => {
-                                  setPadPrescription(rx);
-                                  setShowPadPreview(true);
-                                  loadSavedPads();
-                                }}
-                                data-ocid={`patient_dashboard.prescriptions.open_modal_button.${idx + 1}`}
-                              >
-                                <Printer className="w-3 h-3" />
-                                Pad
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2 text-xs gap-1 border-purple-300 text-purple-700"
-                                onClick={() =>
-                                  downloadSinglePrescriptionPDF(rx)
-                                }
-                                data-ocid={`patient_dashboard.prescriptions.button.${idx + 1}`}
-                              >
-                                <Download className="w-3 h-3" />
-                                PDF
-                              </Button>
+                              {(currentRole === "patient" ||
+                                currentRole === "staff") && (
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-xs gap-1 border-blue-300 text-blue-700"
+                                    onClick={() => setSelectedRx(rx)}
+                                    data-ocid={`patient_dashboard.prescriptions.secondary_button.${idx + 1}`}
+                                  >
+                                    <FileText className="w-3 h-3" />
+                                    View
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 px-2 text-xs gap-1 border-purple-300 text-purple-700"
+                                    onClick={() =>
+                                      downloadSinglePrescriptionPDF(rx)
+                                    }
+                                    data-ocid={`patient_dashboard.prescriptions.button.${idx + 1}`}
+                                  >
+                                    <Download className="w-3 h-3" />
+                                    PDF
+                                  </Button>
+                                </div>
+                              )}
                             </div>
-                          )}
-                          {(currentRole === "patient" ||
-                            currentRole === "staff") && (
-                            <div className="flex items-center gap-1 shrink-0">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2 text-xs gap-1 border-blue-300 text-blue-700"
-                                onClick={() => setSelectedRx(rx)}
-                                data-ocid={`patient_dashboard.prescriptions.secondary_button.${idx + 1}`}
-                              >
-                                <FileText className="w-3 h-3" />
-                                View
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                className="h-7 px-2 text-xs gap-1 border-purple-300 text-purple-700"
-                                onClick={() =>
-                                  downloadSinglePrescriptionPDF(rx)
-                                }
-                                data-ocid={`patient_dashboard.prescriptions.button.${idx + 1}`}
-                              >
-                                <Download className="w-3 h-3" />
-                                PDF
-                              </Button>
-                            </div>
-                          )}
+                            {/* Doctor's view: show viewed-by-patient timestamp */}
+                            {(currentRole === "doctor" ||
+                              currentRole === "admin") && (
+                              <ViewedByPatientBadge
+                                viewedAt={rxExt.viewedByPatientAt}
+                              />
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                 </div>
               )}
             </div>
@@ -4360,6 +4468,35 @@ export default function PatientDashboardInner({
                 .slice(0, 5)}
               latestPlan=""
             />
+          </TabsContent>
+
+          {/* ── INVESTIGATION PAYMENT ── */}
+          <TabsContent value="inv_payment" className="space-y-4">
+            <div className="bg-card rounded-xl border border-border shadow-sm p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+                  <span className="text-purple-700 text-base">🧾</span>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-foreground">
+                    Investigation Payment
+                  </h3>
+                  <p className="text-xs text-muted-foreground">
+                    Bill investigations, apply discount, generate receipt
+                  </p>
+                </div>
+              </div>
+              <InvestigationPayment
+                patientId={String(patientId)}
+                patientName={patient.fullName}
+                registerNumber={
+                  ((patient as Record<string, unknown>)
+                    .registerNumber as string) ?? ""
+                }
+                phone={patient.phone ?? ""}
+                doctorName={doctorName}
+              />
+            </div>
           </TabsContent>
         </div>
       </div>

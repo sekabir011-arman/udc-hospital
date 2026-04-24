@@ -613,10 +613,24 @@ export interface PrescriptionRecord {
 
 // ── Money Receipt ─────────────────────────────────────────────────────────────
 
+export interface InvestigationRate {
+  id: string;
+  name: string;
+  rate: number;
+  discountRate?: number; // percentage, default 0
+}
+
+export interface InvestigationLineItem {
+  name: string;
+  qty: number;
+  unitRate: number;
+  amount: number;
+}
+
 export interface MoneyReceiptData {
   id: string;
   receiptNumber: string;
-  type: "appointment" | "procedure";
+  type: "appointment" | "procedure" | "investigation";
   patientName: string;
   registerNumber?: string;
   phone?: string;
@@ -627,6 +641,11 @@ export interface MoneyReceiptData {
   date: string; // ISO string
   notes?: string;
   serialNumber?: number;
+  /** Investigation receipt fields */
+  investigations?: InvestigationLineItem[];
+  discountRate?: number; // percentage applied to subtotal
+  finalAmount?: number; // amount after discount (may differ from auto-calc if manually overridden)
+  patientId?: string;
 }
 
 export interface DrugReminder {
@@ -640,4 +659,150 @@ export interface DrugReminder {
   status: "active" | "paused" | "completed";
   reminderTimes: string[];
   lastModified: string;
+}
+
+// ── New Feature Types (History & Prescription) ────────────────────────────────
+
+/**
+ * Vaccination record for structured immunization history.
+ * isOverdue is computed at runtime via isVaccineOverdue() in clinicalUtils.ts.
+ */
+export interface VaccinationRecord {
+  id: string;
+  vaccineName: string;
+  dateGiven?: string; // ISO date string
+  dueDate?: string; // ISO date string
+  givenBy?: string;
+  batchNo?: string;
+  isCustom?: boolean;
+  /** Stored as computed cache — recompute with isVaccineOverdue() for accuracy */
+  isOverdue?: boolean;
+}
+
+/**
+ * Structured family history risk flags for common hereditary conditions.
+ * Generates a risk badge visible in patient overview and prescription header.
+ */
+export interface FamilyHistoryRisk {
+  diabetes: boolean;
+  hypertension: boolean;
+  ihd: boolean;
+  cancer: boolean;
+  stroke: boolean;
+  additionalNotes?: string;
+}
+
+/**
+ * Immutable clinical summary snapshot locked at prescription finalization.
+ * Stored separately so editing a visit does NOT retroactively alter the
+ * finalized prescription's clinical context.
+ */
+export interface PrescriptionSnapshot {
+  lockedAt: number; // Unix timestamp (ms)
+  lockedBy: string; // doctorEmail
+  chiefComplaint: string;
+  pastHistory: string;
+  onExamination: string;
+  diagnosis: string;
+  investigations: string[];
+}
+
+/**
+ * Reason a drug was discontinued — required field when removing a drug
+ * from an active prescription to maintain a medico-legal trail.
+ */
+export type DrugDiscontinuationReason =
+  | "course_complete"
+  | "side_effect"
+  | "patient_refused"
+  | "alternative_started"
+  | "other";
+
+/**
+ * Extended Medication that adds dispensing, discontinuation, and override
+ * metadata on top of the base Medication type.
+ *
+ * Cannot use `extends Medication` directly because Medication has a
+ * `[key: string]: string | undefined` index signature — numeric fields
+ * would violate it. We compose instead: spread all Medication string fields
+ * and add typed meta fields in a separate namespace.
+ */
+export interface MedicationWithMeta {
+  // ── All Medication string fields (mirrored for type safety) ────────────────
+  name: string;
+  dose: string;
+  frequency: string;
+  duration: string;
+  instructions?: string;
+  drugForm?: string;
+  drugName?: string;
+  route?: string;
+  routeBn?: string;
+  frequencyBn?: string;
+  durationBn?: string;
+  instructionsBn?: string;
+  specialInstruction?: string;
+  specialInstructionBn?: string;
+  isPrn?: string;
+  prnCondition?: string;
+  [key: string]: unknown; // broader index signature to allow mixed types
+  // ── Meta fields ────────────────────────────────────────────────────────────
+  dispensedAs?: "brand" | "generic" | "substituted";
+  substitutedBrand?: string;
+  discontinuationReason?: DrugDiscontinuationReason;
+  /** Unix timestamp (ms) when drug was discontinued */
+  discontinuedAt?: number;
+  /** Email of doctor who discontinued the drug */
+  discontinuedBy?: string;
+}
+
+/**
+ * Complaint trend entry — tracks how a chief complaint evolved across visits.
+ */
+export interface ComplaintTrendEntry {
+  complaintName: string;
+  firstAppeared: number; // Unix timestamp (ms)
+  firstVisitId: string;
+  severityHistory: {
+    date: number; // Unix timestamp (ms)
+    severity: "mild" | "moderate" | "severe" | "resolved";
+    visitId: string;
+  }[];
+  currentStatus: "active" | "resolved";
+}
+
+/**
+ * Diff between two consecutive prescriptions — highlights medication changes.
+ */
+export interface PrescriptionDiff {
+  addedDrugs: string[];
+  removedDrugs: { name: string; reason?: DrugDiscontinuationReason }[];
+  doseChanges: { name: string; oldDose: string; newDose: string }[];
+}
+
+/**
+ * Record of a clinician overriding an allergy alert to still prescribe the drug.
+ * Stored in audit trail and surfaced to admin/consultant.
+ */
+export interface AllergyOverrideRecord {
+  drugName: string;
+  overriddenBy: string; // doctorEmail
+  overriddenAt: number; // Unix timestamp (ms)
+  justification: string;
+  prescriptionId: string;
+}
+
+// ── Prescription type augmentation ───────────────────────────────────────────
+// These fields extend the core Prescription interface via module augmentation.
+// Re-declare the extended version as PrescriptionExtended for use in new components.
+
+export interface PrescriptionExtended extends Prescription {
+  /** Locked clinical context snapshot — set on finalization, never mutated */
+  finalizedSnapshot?: PrescriptionSnapshot;
+  /** Unix timestamp (ms) when patient first opened/downloaded this prescription */
+  viewedByPatientAt?: number;
+  /** Follow-up date — auto-creates an appointment when set */
+  followUpDate?: number; // Unix timestamp (ms)
+  /** Medications with full meta (dispensing, discontinuation) */
+  medicationsWithMeta?: MedicationWithMeta[];
 }

@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import type { FamilyHistoryRisk } from "../types";
 import CardiovascularExam from "./CardiovascularExam";
 import GastrointestinalExam from "./GastrointestinalExam";
 import MusculoskeletalExam from "./MusculoskeletalExam";
@@ -37,6 +38,10 @@ import PreviousInvestigationTable, {
 } from "./PreviousInvestigationTable";
 import QuestionStepper from "./QuestionStepper";
 import RespiratoryExam from "./RespiratoryExam";
+import {
+  loadFamilyHistoryRisk,
+  saveFamilyHistoryRisk,
+} from "./patientDashboardTypes";
 
 // ─── Examination Quick-fill Templates ─────────────────────────────────────────
 
@@ -801,6 +806,43 @@ export default function VisitForm({
   const [diagnosisStatus, setDiagnosisStatus] = useState<
     "provisional" | "final"
   >("provisional");
+
+  // ─── Family History Risk structured checkboxes ───────────────────────────
+  const [familyRisk, setFamilyRisk] = useState<FamilyHistoryRisk>(() => {
+    try {
+      const email = getDoctorEmail();
+      const patientIdStr = patientId?.toString() ?? "new";
+      return (
+        loadFamilyHistoryRisk(email, patientIdStr) ?? {
+          diabetes: false,
+          hypertension: false,
+          ihd: false,
+          cancer: false,
+          stroke: false,
+          additionalNotes: "",
+        }
+      );
+    } catch {
+      return {
+        diabetes: false,
+        hypertension: false,
+        ihd: false,
+        cancer: false,
+        stroke: false,
+        additionalNotes: "",
+      };
+    }
+  });
+
+  const saveFamilyRisk = (updated: FamilyHistoryRisk) => {
+    try {
+      const email = getDoctorEmail();
+      const patientIdStr = patientId?.toString() ?? "new";
+      saveFamilyHistoryRisk(email, patientIdStr, updated);
+    } catch {
+      /* ignore */
+    }
+  };
 
   // ─── Autosave state ───────────────────────────────────────────────────────
   const [autosavedAt, setAutosavedAt] = useState<Date | null>(null);
@@ -1683,9 +1725,18 @@ export default function VisitForm({
           : "",
       )
       .filter(Boolean);
+
+    // Add structured family history risk factors
+    const riskFactors: string[] = [];
+    if (familyRisk.diabetes) riskFactors.push("Diabetes");
+    if (familyRisk.hypertension) riskFactors.push("Hypertension");
+    if (familyRisk.ihd) riskFactors.push("IHD");
+    if (familyRisk.cancer) riskFactors.push("Cancer");
+    if (familyRisk.stroke) riskFactors.push("Stroke");
+
     const familyLine =
-      familyLines.length > 0
-        ? `On query, family history reveals ${familyLines.join("; ")}.`
+      familyLines.length > 0 || riskFactors.length > 0
+        ? `On query, family history reveals ${[...familyLines, ...(riskFactors.length > 0 ? [`hereditary risk: ${riskFactors.join(", ")}`] : [])].join("; ")}.`
         : "";
 
     const drugs = (formData.drug_history || []).filter((d) =>
@@ -2286,6 +2337,70 @@ export default function VisitForm({
                         </div>
                       </div>
                     )}
+                    {key === "family" && (
+                      <div className="mt-3 bg-rose-50 border border-rose-200 rounded-lg p-3 space-y-2">
+                        <Label className="text-rose-800 font-semibold text-sm">
+                          🧬 Hereditary Risk Factors / বংশগত ঝুঁকি
+                        </Label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {(
+                            [
+                              {
+                                key: "diabetes",
+                                label: "Diabetes Mellitus / ডায়াবেটিস",
+                              },
+                              {
+                                key: "hypertension",
+                                label: "Hypertension / উচ্চ রক্তচাপ",
+                              },
+                              { key: "ihd", label: "IHD / হৃদরোগ" },
+                              { key: "cancer", label: "Cancer / ক্যান্সার" },
+                              { key: "stroke", label: "Stroke / স্ট্রোক" },
+                            ] as {
+                              key: keyof FamilyHistoryRisk;
+                              label: string;
+                            }[]
+                          ).map((item) => (
+                            <label
+                              key={item.key}
+                              className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-colors ${familyRisk[item.key] ? "bg-rose-100 border-rose-400" : "bg-white border-slate-200 hover:border-rose-300"}`}
+                              data-ocid={`family_risk.${item.key}.checkbox`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={!!familyRisk[item.key]}
+                                onChange={(e) => {
+                                  const updated = {
+                                    ...familyRisk,
+                                    [item.key]: e.target.checked,
+                                  };
+                                  setFamilyRisk(updated);
+                                  saveFamilyRisk(updated);
+                                }}
+                                className="w-4 h-4 accent-rose-600"
+                              />
+                              <span className="text-xs font-medium text-slate-700">
+                                {item.label}
+                              </span>
+                            </label>
+                          ))}
+                        </div>
+                        <Input
+                          value={familyRisk.additionalNotes ?? ""}
+                          onChange={(e) => {
+                            const updated = {
+                              ...familyRisk,
+                              additionalNotes: e.target.value,
+                            };
+                            setFamilyRisk(updated);
+                            saveFamilyRisk(updated);
+                          }}
+                          placeholder="Additional notes / অতিরিক্ত মন্তব্য"
+                          className="h-9 text-sm bg-white border-rose-200"
+                          data-ocid="family_risk.notes.input"
+                        />
+                      </div>
+                    )}
                     {(extraHistoryQuestions[key] || []).map((item, eIdx) => (
                       <div
                         key={`ex-${key}-${item.q}-${eIdx}`}
@@ -2397,61 +2512,77 @@ export default function VisitForm({
                 Search Medex
               </Button>
             </div>
-            {drugHistory.map((drug, index) => (
-              <Card
-                key={String(index)}
-                className="bg-slate-50 border-slate-200 p-3"
-              >
-                <div className="flex items-start gap-2">
-                  <div className="flex-1 grid grid-cols-3 gap-2">
-                    <Input
-                      value={drug.drug_name}
-                      onChange={(e) =>
-                        handleDrugHistoryChange(
-                          index,
-                          "drug_name",
-                          e.target.value,
-                        )
-                      }
-                      placeholder="Drug name"
-                      className="h-9 bg-white col-span-1"
-                      data-ocid={`drug_history.input.${index + 1}`}
-                    />
-                    <Input
-                      value={drug.dose}
-                      onChange={(e) =>
-                        handleDrugHistoryChange(index, "dose", e.target.value)
-                      }
-                      placeholder="Dose (e.g. 500mg)"
-                      className="h-9 bg-white"
-                    />
-                    <Input
-                      value={drug.daily_dose}
-                      onChange={(e) =>
-                        handleDrugHistoryChange(
-                          index,
-                          "daily_dose",
-                          e.target.value,
-                        )
-                      }
-                      placeholder="Frequency (e.g. 1+1+1)"
-                      className="h-9 bg-white"
-                    />
+            {drugHistory.map((drug, index) => {
+              // Show Current/Previous status badge if available from auto-update
+              const status = (drug as Record<string, unknown>).status as
+                | string
+                | undefined;
+              return (
+                <Card
+                  key={String(index)}
+                  className={`p-3 ${status === "Previous" ? "bg-slate-100 border-slate-300 opacity-80" : "bg-slate-50 border-slate-200"}`}
+                >
+                  <div className="flex items-start gap-2">
+                    <div className="flex-1 grid grid-cols-3 gap-2">
+                      <div className="col-span-1 space-y-1">
+                        {status && (
+                          <Badge
+                            className={`text-xs h-5 ${status === "Current" ? "bg-green-100 text-green-700 border-green-300" : "bg-slate-200 text-slate-500 border-slate-300"}`}
+                            variant="outline"
+                          >
+                            {status === "Current" ? "✓ Active" : "Previous"}
+                          </Badge>
+                        )}
+                        <Input
+                          value={drug.drug_name}
+                          onChange={(e) =>
+                            handleDrugHistoryChange(
+                              index,
+                              "drug_name",
+                              e.target.value,
+                            )
+                          }
+                          placeholder="Drug name"
+                          className={`h-9 bg-white ${status === "Previous" ? "line-through text-slate-400" : ""}`}
+                          data-ocid={`drug_history.input.${index + 1}`}
+                        />
+                      </div>
+                      <Input
+                        value={drug.dose}
+                        onChange={(e) =>
+                          handleDrugHistoryChange(index, "dose", e.target.value)
+                        }
+                        placeholder="Dose (e.g. 500mg)"
+                        className="h-9 bg-white"
+                      />
+                      <Input
+                        value={drug.daily_dose}
+                        onChange={(e) =>
+                          handleDrugHistoryChange(
+                            index,
+                            "daily_dose",
+                            e.target.value,
+                          )
+                        }
+                        placeholder="Frequency (e.g. 1+1+1)"
+                        className="h-9 bg-white"
+                      />
+                    </div>
+                    {drugHistory.length > 1 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeDrugHistory(index)}
+                        className="h-9 w-9 text-red-500"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
-                  {drugHistory.length > 1 && (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeDrugHistory(index)}
-                      className="h-9 w-9 text-red-500"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </Card>
-            ))}
+                </Card>
+              );
+            })}
           </div>
 
           {/* Other History */}

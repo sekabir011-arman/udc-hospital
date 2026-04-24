@@ -4,16 +4,25 @@ import { cn } from "@/lib/utils";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
   AlertTriangle,
+  BarChart3,
   Bed,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  ClipboardList,
   Clock,
+  DollarSign,
+  FlaskConical,
+  Hospital,
   LayoutDashboard,
   Loader2,
   Menu,
   Pill,
+  PlusCircle,
   RefreshCw,
   ShieldAlert,
+  Siren,
   Stethoscope,
   UserCircle,
   Users,
@@ -39,34 +48,13 @@ interface LayoutProps {
   currentPageName: string;
 }
 
-const baseNavigation = [
-  { name: "Dashboard", href: "/Dashboard", icon: LayoutDashboard },
-  { name: "Patients", href: "/Patients", icon: Users },
-  { name: "Appointments", href: "/Appointments", icon: CalendarDays },
+// Roles that can access Emergency Prescription
+const EMERGENCY_RX_ROLES: StaffRole[] = [
+  "consultant_doctor",
+  "medical_officer",
+  "doctor",
+  "admin",
 ];
-
-const adminNavItem = {
-  name: "AuditLog",
-  href: "/AuditLog",
-  icon: ShieldAlert,
-  label: "Audit Log",
-};
-
-const wardRoundNavItem = {
-  name: "WardRound",
-  href: "/WardRound",
-  icon: Stethoscope,
-  label: "Ward Round",
-};
-
-const bedManagementNavItem = {
-  name: "BedManagement",
-  href: "/BedManagement",
-  icon: Bed,
-  label: "Bed Management",
-};
-
-// Roles that can access Ward Round mode
 const WARD_ROUND_ROLES: StaffRole[] = [
   "doctor",
   "consultant_doctor",
@@ -75,8 +63,6 @@ const WARD_ROUND_ROLES: StaffRole[] = [
   "nurse",
   "admin",
 ];
-
-// Roles that can access Bed Management
 const BED_ROLES: StaffRole[] = [
   "admin",
   "doctor",
@@ -84,6 +70,24 @@ const BED_ROLES: StaffRole[] = [
   "medical_officer",
   "staff",
 ];
+const STAFF_MGMT_ROLES: StaffRole[] = ["admin", "consultant_doctor"];
+
+// ── Sidebar collapse state helpers ───────────────────────────────────────────
+
+function loadSidebarState(key: string, defaultVal: boolean): boolean {
+  try {
+    const val = localStorage.getItem(key);
+    if (val === null) return defaultVal;
+    return val === "true";
+  } catch {
+    return defaultVal;
+  }
+}
+function saveSidebarState(key: string, val: boolean) {
+  try {
+    localStorage.setItem(key, String(val));
+  } catch {}
+}
 
 export default function Layout({ children, currentPageName }: LayoutProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -91,8 +95,17 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
   const [showConflictDialog, setShowConflictDialog] = useState(false);
   const [conflictCount, setConflictCount] = useState(0);
   const [dueMedCount, setDueMedCount] = useState(0);
-  const syncPopoverRef = useRef<HTMLDivElement>(null);
 
+  // Hospital Management group expanded state (default: open)
+  const [hospitalGroupOpen, setHospitalGroupOpen] = useState(() =>
+    loadSidebarState("sidebar_hospital_group_open", true),
+  );
+  // Payment sub-group expanded state (default: open)
+  const [paymentGroupOpen, setPaymentGroupOpen] = useState(() =>
+    loadSidebarState("sidebar_payment_group_open", true),
+  );
+
+  const syncPopoverRef = useRef<HTMLDivElement>(null);
   const state = useRouterState();
   const pathname = state.location.pathname;
   const { currentDoctor } = useEmailAuth();
@@ -103,7 +116,21 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
   const role = (currentDoctor?.role ?? "staff") as StaffRole;
   const canWardRound = WARD_ROUND_ROLES.includes(role) || isAdmin;
   const canBedManagement = BED_ROLES.includes(role) || isAdmin;
+  const canEmergencyRx = EMERGENCY_RX_ROLES.includes(role) || isAdmin;
+  const canStaffMgmt = STAFF_MGMT_ROLES.includes(role) || isAdmin;
   const showMedAlertBell = MED_ALERT_ROLES.includes(role);
+
+  const toggleHospitalGroup = () => {
+    const next = !hospitalGroupOpen;
+    setHospitalGroupOpen(next);
+    saveSidebarState("sidebar_hospital_group_open", next);
+  };
+
+  const togglePaymentGroup = () => {
+    const next = !paymentGroupOpen;
+    setPaymentGroupOpen(next);
+    saveSidebarState("sidebar_payment_group_open", next);
+  };
 
   // Poll conflict count every 5 seconds
   useEffect(() => {
@@ -112,14 +139,6 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
     const iv = setInterval(refresh, 5000);
     return () => clearInterval(iv);
   }, []);
-
-  const navigation = [
-    ...baseNavigation,
-    ...(canBedManagement ? [bedManagementNavItem] : []),
-    { name: "Settings", href: "/Settings", icon: UserCircle },
-    ...(isAdmin ? [adminNavItem] : []),
-    ...(canWardRound ? [wardRoundNavItem] : []),
-  ];
 
   // Count meds due in the next hour for nurse/intern
   useEffect(() => {
@@ -135,7 +154,6 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
         }> = JSON.parse(
           localStorage.getItem("medicare_drug_reminders") || "[]",
         );
-        // Get admitted patient IDs
         const admittedIds = new Set<string>();
         for (let i = 0; i < localStorage.length; i++) {
           const k = localStorage.key(i);
@@ -167,7 +185,6 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
           for (const t of r.times) {
             const [hh] = t.split(":").map(Number);
             if (Math.abs(hh - nowHour) <= 1) {
-              // Check if already recorded for today
               const records: Array<{
                 drugName?: string;
                 scheduledTime?: string;
@@ -247,7 +264,6 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
     });
   })();
 
-  // Sync indicator label + color
   const syncIndicator = (() => {
     if (!isOnline) {
       return {
@@ -290,6 +306,110 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [showSyncPopover]);
+
+  // ── Desktop nav items (flat list for header, first 4 items only) ─────────────
+  const flatNavItems = [
+    { name: "Dashboard", href: "/Dashboard", icon: LayoutDashboard },
+    { name: "Patients", href: "/Patients", icon: Users },
+    { name: "Appointments", href: "/Appointments", icon: CalendarDays },
+    ...(canStaffMgmt
+      ? [{ name: "Staff", href: "/Staff", icon: UserCircle, label: "Staff" }]
+      : []),
+    ...(canEmergencyRx
+      ? [
+          {
+            name: "EmergencyPrescription",
+            href: "/EmergencyPrescription",
+            icon: Siren,
+            label: "Emergency Rx",
+          },
+        ]
+      : []),
+    ...(canWardRound
+      ? [
+          {
+            name: "WardRound",
+            href: "/WardRound",
+            icon: Stethoscope,
+            label: "Ward Round",
+          },
+        ]
+      : []),
+    {
+      name: "Settings",
+      href: "/Settings",
+      icon: UserCircle,
+      label: "Settings",
+    },
+    ...(isAdmin
+      ? [
+          {
+            name: "AuditLog",
+            href: "/AuditLog",
+            icon: ShieldAlert,
+            label: "Audit Log",
+          },
+        ]
+      : []),
+  ];
+
+  // ── Mobile bottom nav (4 most important) ─────────────────────────────────────
+  const mobileNavItems = [
+    { name: "Dashboard", href: "/Dashboard", icon: LayoutDashboard },
+    { name: "Patients", href: "/Patients", icon: Users },
+    { name: "Appointments", href: "/Appointments", icon: CalendarDays },
+    ...(canEmergencyRx
+      ? [
+          {
+            name: "EmergencyPrescription",
+            href: "/EmergencyPrescription",
+            icon: Siren,
+            label: "Emergency Rx",
+          },
+        ]
+      : [
+          {
+            name: "Settings",
+            href: "/Settings",
+            icon: UserCircle,
+            label: "Settings",
+          },
+        ]),
+  ].slice(0, 4);
+
+  // ── Payment sub-items ─────────────────────────────────────────────────────────
+  const paymentItems = [
+    {
+      name: "AppointmentPayment",
+      href: "/AppointmentPayment",
+      icon: CalendarDays,
+      label: "Appointment Payment",
+    },
+    {
+      name: "InvestigationPayment",
+      href: "/InvestigationPayment",
+      icon: FlaskConical,
+      label: "Investigation Payment",
+    },
+    {
+      name: "ProcedurePayment",
+      href: "/ProcedurePayment",
+      icon: ClipboardList,
+      label: "Procedure Payment",
+    },
+    {
+      name: "TotalIncome",
+      href: "/TotalIncome",
+      icon: BarChart3,
+      label: "Total Income",
+    },
+    {
+      name: "OtherPayment",
+      href: "/OtherPayment",
+      icon: PlusCircle,
+      label: "Other Payment",
+    },
+  ];
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-16 md:pb-0">
@@ -338,8 +458,9 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
               </div>
             </Link>
 
+            {/* Desktop nav (flat, no Hospital Management group in header) */}
             <nav className="hidden md:flex items-center gap-1">
-              {navigation.map((item) => {
+              {flatNavItems.slice(0, 5).map((item) => {
                 const label = (item as { label?: string }).label || item.name;
                 return (
                   <Link
@@ -350,7 +471,7 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
                     <Button
                       variant="ghost"
                       className={cn(
-                        "h-9 px-4 text-sm font-medium gap-2",
+                        "h-9 px-3 text-sm font-medium gap-2",
                         isActive(item.name)
                           ? "bg-primary/10 text-primary hover:bg-primary/15"
                           : "text-muted-foreground hover:text-foreground",
@@ -365,7 +486,7 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
             </nav>
 
             <div className="flex items-center gap-2">
-              {/* Medication alert bell for nurse/intern */}
+              {/* Medication alert bell */}
               {showMedAlertBell && (
                 <a
                   href="/Patients"
@@ -489,33 +610,161 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
           </div>
         </div>
 
+        {/* Mobile menu (full navigation with Hospital Management group) */}
         {mobileMenuOpen && (
           <div className="md:hidden border-t border-border bg-card">
-            <nav className="p-3 space-y-1">
-              {navigation.map((item) => {
-                const label = (item as { label?: string }).label || item.name;
-                return (
-                  <Link
-                    key={item.name}
-                    to={item.href as "/Patients"}
-                    onClick={() => setMobileMenuOpen(false)}
-                    data-ocid={`nav.${item.name.toLowerCase()}_link`}
+            <nav className="p-3 space-y-1 max-h-[80vh] overflow-y-auto">
+              {/* Dashboard */}
+              <MobileNavLink
+                name="Dashboard"
+                href="/Dashboard"
+                icon={LayoutDashboard}
+                isActive={isActive}
+                onClose={() => setMobileMenuOpen(false)}
+              />
+              {/* Patient */}
+              <MobileNavLink
+                name="Patients"
+                href="/Patients"
+                icon={Users}
+                label="Patient"
+                isActive={isActive}
+                onClose={() => setMobileMenuOpen(false)}
+              />
+              {/* Appointments */}
+              <MobileNavLink
+                name="Appointments"
+                href="/Appointments"
+                icon={CalendarDays}
+                isActive={isActive}
+                onClose={() => setMobileMenuOpen(false)}
+              />
+
+              {/* Hospital Management group */}
+              {canBedManagement && (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={toggleHospitalGroup}
+                    className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-semibold text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                    data-ocid="nav.hospital_management.toggle"
                   >
-                    <Button
-                      variant="ghost"
-                      className={cn(
-                        "w-full justify-start h-10 gap-3",
-                        isActive(item.name)
-                          ? "bg-primary/10 text-primary"
-                          : "text-muted-foreground",
+                    <Hospital className="w-4 h-4 text-primary/70" />
+                    <span className="flex-1 text-left">
+                      Hospital Management
+                    </span>
+                    {hospitalGroupOpen ? (
+                      <ChevronDown className="w-4 h-4" />
+                    ) : (
+                      <ChevronRight className="w-4 h-4" />
+                    )}
+                  </button>
+                  {hospitalGroupOpen && (
+                    <div className="ml-4 mt-1 space-y-1 border-l border-border pl-3">
+                      {/* Bed Management */}
+                      <MobileNavLink
+                        name="BedManagement"
+                        href="/BedManagement"
+                        icon={Bed}
+                        label="Bed Management"
+                        isActive={isActive}
+                        onClose={() => setMobileMenuOpen(false)}
+                        indent
+                      />
+
+                      {/* Payment sub-group */}
+                      <button
+                        type="button"
+                        onClick={togglePaymentGroup}
+                        className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+                        data-ocid="nav.payment_group.toggle"
+                      >
+                        <DollarSign className="w-4 h-4 text-emerald-600/70" />
+                        <span className="flex-1 text-left">Payment</span>
+                        {paymentGroupOpen ? (
+                          <ChevronDown className="w-3.5 h-3.5" />
+                        ) : (
+                          <ChevronRight className="w-3.5 h-3.5" />
+                        )}
+                      </button>
+                      {paymentGroupOpen && (
+                        <div className="ml-3 space-y-1 border-l border-border pl-3">
+                          {paymentItems.map((item) => (
+                            <MobileNavLink
+                              key={item.name}
+                              name={item.name}
+                              href={item.href}
+                              icon={item.icon}
+                              label={item.label}
+                              isActive={isActive}
+                              onClose={() => setMobileMenuOpen(false)}
+                              indent
+                            />
+                          ))}
+                        </div>
                       )}
-                    >
-                      <item.icon className="w-4 h-4" />
-                      {label}
-                    </Button>
-                  </Link>
-                );
-              })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Staff */}
+              {canStaffMgmt && (
+                <MobileNavLink
+                  name="Staff"
+                  href="/Staff"
+                  icon={Users}
+                  label="Staff"
+                  isActive={isActive}
+                  onClose={() => setMobileMenuOpen(false)}
+                />
+              )}
+
+              {/* Emergency Rx */}
+              {canEmergencyRx && (
+                <MobileNavLink
+                  name="EmergencyPrescription"
+                  href="/EmergencyPrescription"
+                  icon={Siren}
+                  label="Emergency Rx"
+                  isActive={isActive}
+                  onClose={() => setMobileMenuOpen(false)}
+                />
+              )}
+
+              {/* Ward Round */}
+              {canWardRound && (
+                <MobileNavLink
+                  name="WardRound"
+                  href="/WardRound"
+                  icon={Stethoscope}
+                  label="Ward Round"
+                  isActive={isActive}
+                  onClose={() => setMobileMenuOpen(false)}
+                />
+              )}
+
+              {/* Settings */}
+              <MobileNavLink
+                name="Settings"
+                href="/Settings"
+                icon={UserCircle}
+                label="Settings"
+                isActive={isActive}
+                onClose={() => setMobileMenuOpen(false)}
+              />
+
+              {/* Audit Log */}
+              {isAdmin && (
+                <MobileNavLink
+                  name="AuditLog"
+                  href="/AuditLog"
+                  icon={ShieldAlert}
+                  label="Audit Log"
+                  isActive={isActive}
+                  onClose={() => setMobileMenuOpen(false)}
+                />
+              )}
             </nav>
           </div>
         )}
@@ -539,12 +788,13 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
         </div>
       </footer>
 
+      {/* Mobile bottom nav */}
       <nav
         className="md:hidden fixed bottom-0 left-0 right-0 bg-card border-t border-border z-50"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <div className="flex items-stretch h-14">
-          {navigation.slice(0, 4).map((item) => {
+          {mobileNavItems.map((item) => {
             const label = (item as { label?: string }).label || item.name;
             return (
               <Link
@@ -559,7 +809,9 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
                 data-ocid={`nav.${item.name.toLowerCase()}_link`}
               >
                 <item.icon className="w-5 h-5" />
-                {label}
+                <span className="truncate max-w-[60px] text-center">
+                  {label}
+                </span>
               </Link>
             );
           })}
@@ -573,5 +825,48 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
         onAllResolved={() => setConflictCount(0)}
       />
     </div>
+  );
+}
+
+// ── Mobile nav link helper ────────────────────────────────────────────────────
+
+function MobileNavLink({
+  name,
+  href,
+  icon: Icon,
+  label,
+  isActive,
+  onClose,
+  indent = false,
+}: {
+  name: string;
+  href: string;
+  icon: React.ComponentType<{ className?: string }>;
+  label?: string;
+  isActive: (name: string) => boolean;
+  onClose: () => void;
+  indent?: boolean;
+}) {
+  const displayLabel = label || name;
+  return (
+    <Link
+      to={href as "/Patients"}
+      onClick={onClose}
+      data-ocid={`nav.${name.toLowerCase()}_link`}
+    >
+      <Button
+        variant="ghost"
+        className={cn(
+          "w-full justify-start h-10 gap-3 text-sm",
+          indent && "pl-2",
+          isActive(name)
+            ? "bg-primary/10 text-primary"
+            : "text-muted-foreground",
+        )}
+      >
+        <Icon className="w-4 h-4 shrink-0" />
+        {displayLabel}
+      </Button>
+    </Link>
   );
 }
