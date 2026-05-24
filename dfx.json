@@ -3,7 +3,7 @@
   "canisters": {
     "backend": {
       "type": "motoko",
-      "main": "src/backend/main.mo"
+      "main": "dr-arman-kabir-s-care/.old/src/backend/dist/backend.most"
     }
   }
 }
