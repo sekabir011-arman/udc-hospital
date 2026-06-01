@@ -1,0 +1,38 @@
+// admission.did — Candid interface for the admission-data canister
+// Bed management, admissions, transfers, and discharge
+
+type PatientId   = text;
+type AdmissionId = text;
+type BedId       = text;
+type Timestamp   = int;
+
+type Bed = record {
+  id       : BedId;
+  ward     : text;
+  floor    : text;
+  bedType  : text;  // "General" | "ICU" | "HDU" | "Isolation" | "Private" | "Cabin"
+  status   : text;  // "Available" | "Occupied" | "Reserved" | "Cleaning"
+  patientId : opt PatientId;
+};
+
+type Admission = record {
+  id          : AdmissionId;
+  patientId   : PatientId;
+  bedId       : BedId;
+  admittedAt  : Timestamp;
+  dischargedAt : opt Timestamp;
+  status      : text;  // "Active" | "Discharged"
+};
+
+service : {
+  createBed       : (text, text, text) -> (BedId);
+  getBed          : (BedId)            -> (opt Bed)       query;
+  listBeds        : ()                 -> (vec Bed)       query;
+  updateBedStatus : (BedId, text)      -> (bool);
+  admitPatient    : (PatientId, BedId) -> (AdmissionId);
+  getAdmission    : (AdmissionId)      -> (opt Admission) query;
+  listAdmissions  : (PatientId)        -> (vec Admission) query;
+  transferBed     : (AdmissionId, BedId) -> (bool);
+  dischargePatient : (AdmissionId)     -> (bool);
+  listAdmittedPatients : ()            -> (vec Admission) query;
+};

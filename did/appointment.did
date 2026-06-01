@@ -1,0 +1,36 @@
+// appointment.did — Candid interface for the appointment-data canister
+// Scheduling, slot availability, and booking management
+
+type PatientId     = text;
+type AppointmentId = text;
+type Timestamp     = int;
+
+type Appointment = record {
+  id          : AppointmentId;
+  patientId   : PatientId;
+  doctorId    : text;
+  chamber     : text;
+  slotDate    : text;  // ISO date string YYYY-MM-DD
+  slotTime    : text;  // HH:MM
+  status      : text;  // "Pending" | "Confirmed" | "Cancelled" | "Completed"
+  serial      : nat;
+  createdAt   : Timestamp;
+};
+
+type BookArgs = record {
+  patientId : PatientId;
+  doctorId  : text;
+  chamber   : text;
+  slotDate  : text;
+  slotTime  : text;
+};
+
+service : {
+  bookAppointment      : (BookArgs)          -> (AppointmentId);
+  getAppointment       : (AppointmentId)     -> (opt Appointment) query;
+  listAppointments     : (PatientId)         -> (vec Appointment) query;
+  listByDate           : (text)              -> (vec Appointment) query;
+  cancelAppointment    : (AppointmentId)     -> (bool);
+  completeAppointment  : (AppointmentId)     -> (bool);
+  getAvailableSlots    : (text, text, text)  -> (vec text)        query;
+};

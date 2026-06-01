@@ -1,27 +1,22 @@
 {
   "name": "@caffeine/template-app",
-  "private": true,
   "type": "module",
-  "packageManager": "pnpm@8.15.6",
   "engines": {
-    "node": "20.x",
-    "pnpm": "8.15.6"
+    "node": ">=16.0.0",
+    "pnpm": ">=7.0.0",
+    "npm": "please use pnpm"
   },
   "scripts": {
     "build": "pnpm -r --if-present run build",
-    "dev": "pnpm -r --if-present run dev",
     "typecheck": "pnpm -r --if-present run typecheck",
     "check": "pnpm -r --if-present run check",
     "fix": "pnpm -r --if-present run fix",
     "bindgen": "caffeine-bindgen --did-file ./src/backend/dist/backend.did --out-dir ./src/frontend/src --actor-interface-file --force"
   },
   "devDependencies": {
-    "vite": "^8.0.14"
+    "sharp": "^0.34.4"
   },
   "dependencies": {
-    "@caffeineai/core-infrastructure": "^0.3.0",
-    "@dfinity/auth-client": "~3.3.1",
-    "@nhost/nhost-js": "^4.7.1",
-    "@vercel/analytics": "^2.0.1"
+    "@caffeineai/core-infrastructure": "^0.3.0"
   }
 }

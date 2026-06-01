@@ -360,16 +360,27 @@ function ReceiptModal({
   const [showDownloadOptions, setShowDownloadOptions] = useState(false);
 
   function handlePrint(paperSize: "A4" | "A5" | "A3" = "A4") {
-    const old = document.getElementById("_inv_ps");
-    if (old) old.remove();
-    const s = document.createElement("style");
-    s.id = "_inv_ps";
-    s.textContent = `@media print{@page{size:${paperSize};margin:10mm}body *{visibility:hidden!important}#receipt-printable-inv,#receipt-printable-inv *{visibility:visible!important}#receipt-printable-inv{position:fixed;left:0;top:0;width:100%}.no-print{display:none!important}}`;
-    document.head.appendChild(s);
-    window.print();
-    setTimeout(() => {
-      document.getElementById("_inv_ps")?.remove();
-    }, 2000);
+    const bodyHtml = printRef.current ? printRef.current.innerHTML : "";
+    const headerHtml = `<div style="background:linear-gradient(135deg,#1d4ed8 0%,#7c3aed 100%);padding:20px 24px 16px;margin-bottom:0">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <div style="width:44px;height:44px;border-radius:10px;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;font-weight:900;font-size:22px;color:white;flex-shrink:0">A</div>
+        <div>
+          <div style="color:white;font-weight:900;font-size:18px;letter-spacing:-0.02em;line-height:1.2">Dr. Arman Kabir&#39;s Care</div>
+          <div style="color:rgba(255,255,255,0.75);font-size:11px">Patient Management &amp; Clinical Portal</div>
+        </div>
+      </div>
+      <div style="background:rgba(255,255,255,0.15);border-radius:8px;padding:10px 14px">
+        <div style="color:rgba(255,255,255,0.8);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em">Investigation Receipt</div>
+        <div style="color:white;font-weight:900;font-size:18px;font-family:monospace">${receipt.receiptNumber}</div>
+      </div>
+    </div>`;
+    triggerReceiptPrint({
+      bodyHtml,
+      headerHtml,
+      withHeader: true,
+      paperSize,
+      filename: `receipt-${receipt.receiptNumber}`,
+    });
   }
 
   function handleDownload(withHeader: boolean, paperSize: "A4" | "A5" | "A3") {

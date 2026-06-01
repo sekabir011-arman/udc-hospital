@@ -1,0 +1,56 @@
+// clinical.did — Candid interface for the clinical-data canister
+// Visits, SOAP notes, prescriptions, and investigation orders
+
+type PatientId  = text;
+type VisitId    = text;
+type NoteId     = text;
+type RxId       = text;
+type Timestamp  = int;
+
+type Visit = record {
+  id          : VisitId;
+  patientId   : PatientId;
+  visitType   : text;  // "OPD" | "Admitted"
+  chiefComplaint : text;
+  diagnosis   : text;
+  status      : text;  // "Draft" | "InProgress" | "Finalized"
+  createdAt   : Timestamp;
+  updatedAt   : Timestamp;
+};
+
+type SoapNote = record {
+  id           : NoteId;
+  patientId    : PatientId;
+  visitId      : VisitId;
+  subjective   : text;
+  objective    : text;
+  assessment   : text;
+  plan         : text;
+  authorRole   : text;
+  status       : text;  // "Draft" | "Submitted" | "Reviewed" | "Finalized"
+  createdAt    : Timestamp;
+};
+
+type Prescription = record {
+  id          : RxId;
+  patientId   : PatientId;
+  visitId     : VisitId;
+  drugs       : vec text;
+  notes       : text;
+  createdAt   : Timestamp;
+};
+
+service : {
+  createVisit        : (PatientId, text, text)    -> (VisitId);
+  getVisit           : (VisitId)                  -> (opt Visit)      query;
+  listVisits         : (PatientId)                -> (vec Visit)      query;
+  finalizeVisit      : (VisitId)                  -> (bool);
+  createSoapNote     : (PatientId, VisitId, text, text, text, text) -> (NoteId);
+  getSoapNote        : (NoteId)                   -> (opt SoapNote)   query;
+  listSoapNotes      : (PatientId)                -> (vec SoapNote)   query;
+  submitSoapNote     : (NoteId)                   -> (bool);
+  finalizeSoapNote   : (NoteId)                   -> (bool);
+  createPrescription : (PatientId, VisitId, vec text, text) -> (RxId);
+  getPrescription    : (RxId)                     -> (opt Prescription) query;
+  listPrescriptions  : (PatientId)                -> (vec Prescription) query;
+};

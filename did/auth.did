@@ -1,0 +1,47 @@
+// auth.did — Candid interface for the auth-roles canister
+// Role assignment, permission checks, and user identity management
+
+type UserId    = principal;
+type Timestamp = int;
+
+type UserRole = variant {
+  Admin;
+  Consultant;
+  AssistantProfessor;
+  AssociateProfessor;
+  Professor;
+  Registrar;
+  AssistantRegistrar;
+  MedicalOfficer;
+  InternDoctor;
+  Nurse;
+  Reception;
+  Patient;
+};
+
+type UserRecord = record {
+  id        : UserId;
+  email     : text;
+  name      : text;
+  role      : UserRole;
+  approved  : bool;
+  createdAt : Timestamp;
+};
+
+type RegisterArgs = record {
+  email : text;
+  name  : text;
+  role  : UserRole;
+};
+
+service : {
+  registerUser     : (RegisterArgs)    -> (bool);
+  getUser          : (UserId)          -> (opt UserRecord) query;
+  getUserByEmail   : (text)            -> (opt UserRecord) query;
+  approveUser      : (UserId)          -> (bool);
+  updateRole       : (UserId, UserRole) -> (bool);
+  hasPermission    : (UserId, text)    -> (bool)            query;
+  listUsers        : ()                -> (vec UserRecord)  query;
+  listByRole       : (UserRole)        -> (vec UserRecord)  query;
+  deactivateUser   : (UserId)          -> (bool);
+};

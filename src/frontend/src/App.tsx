@@ -1,6 +1,3 @@
-import { useEffect } from "react";
-import { startSyncEngine } from "./lib/startSync";
-
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +42,8 @@ import { motion } from "motion/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Layout from "./Layout";
 import { createActor } from "./backend";
+import { CanisterActorsProvider } from "./canisterActors";
+import { CANISTER_ID_BACKEND as BUILD_TIME_CANISTER_ID } from "./canisterConfig";
 import { useAdminAuth } from "./hooks/useAdminAuth";
 import {
   EmailAuthProvider,
@@ -1254,12 +1253,21 @@ function AppInner() {
     if (canisterActorRef.current) return;
 
     function resolveCanisterId(): string {
+      // Pattern 0 (build-time): hardcoded at compile time — most reliable, always works on Vercel
+      if (BUILD_TIME_CANISTER_ID && BUILD_TIME_CANISTER_ID.trim() !== "") {
+        console.log(
+          "[sync] Using build-time embedded canister ID:",
+          BUILD_TIME_CANISTER_ID,
+        );
+        return BUILD_TIME_CANISTER_ID.trim();
+      }
+
       const w = window as unknown as Record<string, unknown>;
       const envRaw = (
         import.meta as unknown as Record<string, Record<string, string>>
       ).env;
 
-      // Pattern 0: build-time injected by vite.config.js define block
+      // Pattern 0b: build-time injected by vite.config.js define block
       // (catches both Vercel VITE_ prefix and Caffeine platform prefix)
       const p0 = w.__RESOLVED_CANISTER_ID_BACKEND as string | undefined;
       if (p0 && p0 !== "undefined" && p0 !== "") return p0;
@@ -2040,7 +2048,8 @@ function AppInner() {
     );
   }
 
-  const showBackendBanner = backendDisconnected && !bannerDismissed;
+  const showBackendBanner =
+    (backendDisconnected || BUILD_TIME_CANISTER_ID === "") && !bannerDismissed;
 
   if (!currentDoctor) {
     return (
@@ -2216,19 +2225,29 @@ function AppInner() {
             <div className="flex items-center gap-2">
               <span className="inline-block w-2 h-2 rounded-full bg-white/60 animate-pulse" />
               <span>
-                Backend not connected — data will not sync between devices.
-                Retrying...
+                Backend not connected — data is saved on this device only and
+                will NOT sync to other devices. Contact support if this
+                persists.
               </span>
             </div>
-            <button
-              type="button"
-              aria-label="Dismiss banner"
-              onClick={() => setBannerDismissed(true)}
-              className="ml-auto shrink-0 rounded p-0.5 hover:bg-white/20 transition-colors"
-              data-ocid="sync.backend_banner.close_button"
-            >
-              <X size={16} aria-hidden="true" />
-            </button>
+            <div className="flex items-center gap-2 ml-auto shrink-0">
+              <button
+                type="button"
+                onClick={() => window.location.reload()}
+                className="rounded px-2 py-0.5 text-xs bg-white/20 hover:bg-white/30 transition-colors font-semibold"
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                aria-label="Dismiss banner"
+                onClick={() => setBannerDismissed(true)}
+                className="rounded p-0.5 hover:bg-white/20 transition-colors"
+                data-ocid="sync.backend_banner.close_button"
+              >
+                <X size={16} aria-hidden="true" />
+              </button>
+            </div>
           </div>
           {/* Vercel-specific hint shown after 50s of failed retries */}
           {showVercelHint && (
@@ -2357,8 +2376,10 @@ function PatientPortalView({
 
 export default function App() {
   return (
-    <EmailAuthProvider>
-      <AppInner />
-    </EmailAuthProvider>
+    <CanisterActorsProvider>
+      <EmailAuthProvider>
+        <AppInner />
+      </EmailAuthProvider>
+    </CanisterActorsProvider>
   );
 }

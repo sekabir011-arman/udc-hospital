@@ -1,0 +1,29 @@
+// queue.did — Candid interface for the queue-data canister
+// OPD serial queue management
+
+type PatientId = text;
+type QueueId   = text;
+type Timestamp = int;
+
+type QueueEntry = record {
+  id          : QueueId;
+  patientId   : PatientId;
+  patientName : text;
+  serial      : nat;
+  chamber     : text;
+  doctorId    : text;
+  date        : text;
+  status      : text;  // "Waiting" | "Called" | "Seen" | "Skipped"
+  createdAt   : Timestamp;
+};
+
+service : {
+  addToQueue      : (PatientId, text, text, text, text) -> (QueueId);
+  getEntry        : (QueueId)   -> (opt QueueEntry) query;
+  listQueue       : (text, text) -> (vec QueueEntry) query;
+  callNext        : (text, text) -> (opt QueueEntry);
+  markSeen        : (QueueId)   -> (bool);
+  skipEntry       : (QueueId)   -> (bool);
+  getSerialNumber : (text, text) -> (nat) query;
+  clearQueue      : (text, text) -> (bool);
+};

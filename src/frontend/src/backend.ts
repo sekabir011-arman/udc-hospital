@@ -7233,21 +7233,13 @@ export interface CreateActorOptions {
     processError?: (error: unknown) => never;
 }
 export function createActor(canisterId: string, _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, options: CreateActorOptions = {}): Backend {
-    const host =
-  import.meta.env.VITE_DFX_NETWORK === "local"
-    ? "http://127.0.0.1:4943"
-    : "https://icp-api.io";
-
-const agent =
-  options.agent ||
-  HttpAgent.createSync({
-    host,
-    ...options.agentOptions,
-  });
+    const agent = options.agent || HttpAgent.createSync({
+        ...options.agentOptions
+    });
     if (options.agent && options.agentOptions) {
         console.warn("Detected both agent and agentOptions passed to createActor. Ignoring agentOptions and proceeding with the provided agent.");
     }
-     const actor = Actor.createActor<_SERVICE>(idlFactory, {
+    const actor = Actor.createActor<_SERVICE>(idlFactory, {
         agent,
         canisterId: canisterId,
         ...options.actorOptions

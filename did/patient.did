@@ -1,0 +1,36 @@
+// patient.did — Candid interface for the patient-data canister
+// Main public methods for patient registration, lookup, and search
+
+type PatientId = text;
+type Timestamp = int;
+
+type Patient = record {
+  id         : PatientId;
+  name       : text;
+  age        : nat;
+  sex        : text;
+  phone      : text;
+  email      : opt text;
+  bloodGroup : opt text;
+  createdAt  : Timestamp;
+  updatedAt  : Timestamp;
+};
+
+type CreatePatientArgs = record {
+  name       : text;
+  age        : nat;
+  sex        : text;
+  phone      : text;
+  email      : opt text;
+  bloodGroup : opt text;
+};
+
+service : {
+  createPatient   : (CreatePatientArgs) -> (PatientId);
+  getPatient      : (PatientId)         -> (opt Patient) query;
+  updatePatient   : (PatientId, CreatePatientArgs) -> (bool);
+  deletePatient   : (PatientId)         -> (bool);
+  searchPatients  : (text)              -> (vec Patient) query;
+  listPatients    : (nat, nat)          -> (vec Patient) query;
+  getPatientCount : ()                  -> (nat)         query;
+};

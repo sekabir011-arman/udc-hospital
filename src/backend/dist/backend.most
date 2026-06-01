@@ -174,8 +174,8 @@ type DailyProgressNote__515584449 =
     versionInfo : VersionedRecord__27047174
   };
 type DailyProgressType__979730859 = {#emergency; #evening; #morning};
-type Data__791452850<K, V> =
-  {var count : Nat__490723111; kvs : [var ?(K, V)]};
+type Data__1058404250<K, V> =
+  {var count : Nat__377626606; kvs : [var ?(K, V)]};
 type DiagnosisTemplate__883104078 =
   {
     createdAt : Int;
@@ -246,15 +246,15 @@ type HandoverEntry__487905025 =
   };
 type HandoverShift__718289696 = {#evening; #morning; #night};
 type HandoverStatus__763248425 = {#draft; #submitted};
-type Int__270357528 = Int__616954475;
+type Int__524396124 = Int__616954475;
 type Int__616954475 = Int;
-type Internal__8484328<K, V> =
-  {children : [var ?Node__46230540<K, V>]; data : Data__791452850<K, V>};
-type Leaf__809889148<K, V> = {data : Data__791452850<K, V>};
-type Map__158565046<K, V> = Map__297112838<K, V>;
-type Map__297112838<K, V> =
-  {var root : Node__46230540<K, V>; var size : Nat__490723111};
-type Map__605269027<K, V> = Map__158565046<K, V>;
+type Internal__324281475<K, V> =
+  {children : [var ?Node__26180913<K, V>]; data : Data__1058404250<K, V>};
+type Leaf__229566841<K, V> = {data : Data__1058404250<K, V>};
+type Map__151839099<K, V> = Map__543080657<K, V>;
+type Map__337027143<K, V> = Map__151839099<K, V>;
+type Map__543080657<K, V> =
+  {var root : Node__26180913<K, V>; var size : Nat__377626606};
 type MedicationAdministrationStatus__873860857 =
   {#Delayed; #Given; #NotGiven};
 type MedicationAdministration__900116004 =
@@ -291,10 +291,10 @@ type Medication__77603812 =
     instructions : Text;
     name : Text
   };
-type Nat__490723111 = Nat__920180692;
+type Nat__377626606 = Nat__920180692;
 type Nat__920180692 = Nat;
-type Node__46230540<K, V> =
-  {#internal : Internal__8484328<K, V>; #leaf : Leaf__809889148<K, V>};
+type Node__26180913<K, V> =
+  {#internal : Internal__324281475<K, V>; #leaf : Leaf__229566841<K, V>};
 type NoteType__332347553 =
   {#DailyProgress; #Discharge; #General; #Handover; #Nursing; #SOAP};
 type ObservationStatus__342199766 = {#Corrected; #Final; #Preliminary};
@@ -339,8 +339,8 @@ type Patient__823362798 =
     chronicConditions : [Text];
     consultantEmail : ?Text;
     consultantName : ?Text;
-    createdAt : Time__900049286;
-    dateOfBirth : ?Time__900049286;
+    createdAt : Time__211514378;
+    dateOfBirth : ?Time__211514378;
     email : ?Text;
     fullName : Text;
     gender : Gender__579703926;
@@ -350,7 +350,7 @@ type Patient__823362798 =
     pastSurgicalHistory : ?Text;
     patientType : PatientType__384173924;
     phone : ?Text;
-    updatedAt : Time__900049286;
+    updatedAt : Time__211514378;
     weight : ?Float
   };
 type Prescription__317112238 =
@@ -375,14 +375,14 @@ type Prescription__317112238 =
   };
 type Prescription__847157722 =
   {
-    createdAt : Time__900049286;
+    createdAt : Time__211514378;
     diagnosis : ?Text;
     id : Nat;
     medications : [Medication__77603812];
     notes : ?Text;
     patientId : Nat;
-    prescriptionDate : Time__900049286;
-    updatedAt : Time__900049286;
+    prescriptionDate : Time__211514378;
+    updatedAt : Time__211514378;
     visitId : ?Nat
   };
 type QueueStatus__1020443397 = {#done; #serving; #skipped; #waiting};
@@ -435,8 +435,8 @@ type SyncRecord__825211546 =
     pendingChanges : Nat;
     userId : Principal
   };
-type Time__796480547 = Int__270357528;
-type Time__900049286 = Time__796480547;
+type Time__211514378 = Time__697892622;
+type Time__697892622 = Int__524396124;
 type UserProfile__491224006 = {name : Text};
 type UserRole__587919431 = {#admin; #guest; #user};
 type VersionedRecord__27047174 =
@@ -452,15 +452,15 @@ type VisitType__1071834702 = {#admitted; #outdoor};
 type Visit__635288371 =
   {
     chiefComplaint : Text;
-    createdAt : Time__900049286;
+    createdAt : Time__211514378;
     diagnosis : ?Text;
     historyOfPresentIllness : ?Text;
     id : Nat;
     notes : ?Text;
     patientId : Nat;
     physicalExamination : ?Text;
-    updatedAt : Time__900049286;
-    visitDate : Time__900049286;
+    updatedAt : Time__211514378;
+    visitDate : Time__211514378;
     visitType : VisitType__1071834702;
     vitalSigns : VitalSigns__681997343
   };
@@ -478,67 +478,67 @@ actor {
   stable accessControlState :
     {
       var adminAssigned : Bool;
-      userRoles : Map__605269027<Principal, UserRole__587919431>
+      userRoles : Map__337027143<Principal, UserRole__587919431>
     };
   stable clinicalEngineState :
     {
       var admissionIdCounter : Nat;
-      admissions : Map__605269027<Nat, AdmissionRecord__203366727>;
+      admissions : Map__337027143<Nat, AdmissionRecord__203366727>;
       var alertIdCounter : Nat;
-      alerts : Map__605269027<Nat, ClinicalAlert__620379123>;
-      appointments : Map__605269027<Text, Appointment__139380045>;
-      auditEntries : Map__605269027<Nat, AuditEntry__24563336>;
+      alerts : Map__337027143<Nat, ClinicalAlert__620379123>;
+      appointments : Map__337027143<Text, Appointment__139380045>;
+      auditEntries : Map__337027143<Nat, AuditEntry__24563336>;
       var auditIdCounter : Nat;
       var bedIdCounter : Nat;
-      beds : Map__605269027<Nat, BedRecord__90428469>;
+      beds : Map__337027143<Nat, BedRecord__90428469>;
       var dailyProgressNoteIdCounter : Nat;
-      dailyProgressNotes : Map__605269027<Nat, DailyProgressNote__515584449>;
+      dailyProgressNotes : Map__337027143<Nat, DailyProgressNote__515584449>;
       var diagnosisTemplateIdCounter : Nat;
-      diagnosisTemplates : Map__605269027<Nat, DiagnosisTemplate__883104078>;
-      emailIndex : Map__605269027<Text, Principal>;
+      diagnosisTemplates : Map__337027143<Nat, DiagnosisTemplate__883104078>;
+      emailIndex : Map__337027143<Text, Principal>;
       var encounterIdCounter : Nat;
-      encounters : Map__605269027<Nat, Encounter__298641220>;
+      encounters : Map__337027143<Nat, Encounter__298641220>;
       var handoverIdCounter : Nat;
-      handovers : Map__605269027<Nat, HandoverEntry__487905025>;
+      handovers : Map__337027143<Nat, HandoverEntry__487905025>;
       var medicationAdministrationIdCounter : Nat;
       medicationAdministrations :
-        Map__605269027<Nat, MedicationAdministration__900116004>;
+        Map__337027143<Nat, MedicationAdministration__900116004>;
       var noteIdCounter : Nat;
-      notes : Map__605269027<Nat, ClinicalNote__118286836>;
+      notes : Map__337027143<Nat, ClinicalNote__118286836>;
       var observationIdCounter : Nat;
-      observations : Map__605269027<Nat, Observation__633753642>;
+      observations : Map__337027143<Nat, Observation__633753642>;
       var orderIdCounter : Nat;
-      orders : Map__605269027<Nat, ClinicalOrder__887323512>;
+      orders : Map__337027143<Nat, ClinicalOrder__887323512>;
       var prescriptionIdCounter : Nat;
-      prescriptions : Map__605269027<Nat, Prescription__317112238>;
-      queueEntries : Map__605269027<Text, SerialQueueEntry__257017409>;
+      prescriptions : Map__337027143<Nat, Prescription__317112238>;
+      queueEntries : Map__337027143<Text, SerialQueueEntry__257017409>;
       var roleChangeIdCounter : Nat;
-      roleChangeLog : Map__605269027<Nat, RoleChangeEntry__731699724>;
+      roleChangeLog : Map__337027143<Nat, RoleChangeEntry__731699724>;
       var syncRecordIdCounter : Nat;
-      syncRecords : Map__605269027<Text, SyncRecord__825211546>
+      syncRecords : Map__337027143<Text, SyncRecord__825211546>
     };
   stable var frontPageContent : ?Text;
   stable var patientIdCounter : Nat;
   stable patients :
     {
-      var root : Node__46230540<Nat, Patient__823362798>;
-      var size : Nat__490723111
+      var root : Node__26180913<Nat, Patient__823362798>;
+      var size : Nat__377626606
     };
   stable var prescriptionIdCounter : Nat;
   stable prescriptions :
     {
-      var root : Node__46230540<Nat, Prescription__847157722>;
-      var size : Nat__490723111
+      var root : Node__26180913<Nat, Prescription__847157722>;
+      var size : Nat__377626606
     };
   stable userProfiles :
     {
-      var root : Node__46230540<Principal, UserProfile__491224006>;
-      var size : Nat__490723111
+      var root : Node__26180913<Principal, UserProfile__491224006>;
+      var size : Nat__377626606
     };
   stable var visitIdCounter : Nat;
   stable visits :
     {
-      var root : Node__46230540<Nat, Visit__635288371>;
-      var size : Nat__490723111
+      var root : Node__26180913<Nat, Visit__635288371>;
+      var size : Nat__377626606
     }
 };

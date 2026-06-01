@@ -40,6 +40,15 @@ import { getClinicalStore, saveClinicalStore } from "../lib/clinicalStore";
 import { saveClinicalEntitiesWithSync } from "../lib/hybridStorage";
 import type { BedRecord, BedType, Patient } from "../types";
 
+// ── BigInt normalisation helper ─────────────────────────────────────────────
+const normBigInt = (val: unknown): bigint => {
+  try {
+    return BigInt(String(val ?? 0));
+  } catch {
+    return BigInt(0);
+  }
+};
+
 // ── Bed Type config ──────────────────────────────────────────────────────────
 const BED_TYPES: BedType[] = [
   "General",
@@ -938,7 +947,12 @@ export default function BedManagement() {
   }, [filteredBeds]);
 
   const transferableEmpty = useMemo(
-    () => beds.filter((b) => b.status === "Empty" && b.id !== selectedBed?.id),
+    () =>
+      beds.filter(
+        (b) =>
+          b.status === "Empty" &&
+          normBigInt(b.id) !== normBigInt(selectedBed?.id),
+      ),
     [beds, selectedBed],
   );
 
@@ -986,7 +1000,7 @@ export default function BedManagement() {
 
   function confirmDischarge(bed: BedRecord) {
     updateBedInStore((b) =>
-      b.id === bed.id
+      normBigInt(b.id) === normBigInt(bed.id)
         ? {
             ...b,
             status: "Cleaning" as BedStatus,
@@ -1014,7 +1028,9 @@ export default function BedManagement() {
 
   function markBedReady(bed: BedRecord) {
     updateBedInStore((b) =>
-      b.id === bed.id ? { ...b, status: "Empty" as BedStatus } : b,
+      normBigInt(b.id) === normBigInt(bed.id)
+        ? { ...b, status: "Empty" as BedStatus }
+        : b,
     );
     setSelectedBed(null);
     toast.success(`Bed ${bed.bedNumber} is now Available`);
@@ -1022,7 +1038,9 @@ export default function BedManagement() {
 
   function markBedMaintenance(bed: BedRecord) {
     updateBedInStore((b) =>
-      b.id === bed.id ? { ...b, status: "Maintenance" as BedStatus } : b,
+      normBigInt(b.id) === normBigInt(bed.id)
+        ? { ...b, status: "Maintenance" as BedStatus }
+        : b,
     );
     setSelectedBed(null);
     toast.success("Bed marked for maintenance");
@@ -1037,7 +1055,7 @@ export default function BedManagement() {
       Date.now() + expiryHours * 60 * 60 * 1000,
     ).toISOString();
     updateBedInStore((b) =>
-      b.id === bed.id
+      normBigInt(b.id) === normBigInt(bed.id)
         ? {
             ...b,
             status: "Reserved" as BedStatus,
@@ -1060,7 +1078,9 @@ export default function BedManagement() {
       Math.max(current, Date.now()) + 60 * 60 * 1000,
     ).toISOString(); // +1h
     updateBedInStore((b) =>
-      b.id === bed.id ? { ...b, reservationExpiry: extended } : b,
+      normBigInt(b.id) === normBigInt(bed.id)
+        ? { ...b, reservationExpiry: extended }
+        : b,
     );
     setSelectedBed(null);
     toast.success("Reservation extended by 1 hour");
@@ -1842,7 +1862,7 @@ export default function BedManagement() {
                   if (!selectedBed || !transferBedId) return;
                   transferPatient(
                     selectedBed,
-                    BigInt(transferBedId),
+                    normBigInt(transferBedId),
                     transferReason,
                   );
                 }}

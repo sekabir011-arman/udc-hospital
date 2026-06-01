@@ -1,0 +1,30 @@
+// sync.did — Candid interface for the sync-device canister
+// Device-level delta tracking and incremental sync queries
+
+type DeviceId   = text;
+type Timestamp  = int;
+
+type SyncDelta = record {
+  entityType  : text;  // "patient" | "clinical" | "admission" | "appointment" | "queue" | "alert"
+  entityId    : text;
+  operation   : text;  // "create" | "update" | "delete"
+  payload     : text;  // JSON-encoded delta
+  version     : nat;
+  timestamp   : Timestamp;
+};
+
+type DeviceState = record {
+  deviceId    : DeviceId;
+  lastSyncAt  : Timestamp;
+  pendingCount : nat;
+};
+
+service : {
+  registerDevice      : (DeviceId)              -> (bool);
+  getDeviceState      : (DeviceId)              -> (opt DeviceState)  query;
+  pushDelta           : (DeviceId, SyncDelta)   -> (nat);
+  pullDeltas          : (DeviceId, Timestamp)   -> (vec SyncDelta)    query;
+  acknowledgeDelta    : (DeviceId, nat)         -> (bool);
+  getPendingCount     : (DeviceId)              -> (nat)              query;
+  listDevices         : ()                      -> (vec DeviceState)  query;
+};

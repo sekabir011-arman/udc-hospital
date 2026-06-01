@@ -117,48 +117,59 @@ export function triggerReceiptPrint(opts: DownloadReceiptOptions) {
   const { bodyHtml, headerHtml, withHeader, paperSize, filename } = opts;
   const content = withHeader ? headerHtml + bodyHtml : bodyHtml;
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${filename}</title><style>
-    @page { size: ${paperSize}; margin: 10mm; }
+    @page { size: ${paperSize} portrait; margin: 10mm; }
     * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-    body { margin: 0; font-family: serif; background: white; }
+    body { margin: 0; padding: 0; font-family: serif; background: white; }
     table { border-collapse: collapse; }
   </style></head><body>${content}</body></html>`;
 
-  // Use a hidden iframe so the rest of the app is not affected
+  // Remove any stale iframe from a previous call
+  const stale = document.getElementById("_receipt_print_iframe");
+  if (stale) stale.remove();
+
   const iframe = document.createElement("iframe");
+  iframe.id = "_receipt_print_iframe";
   iframe.style.cssText =
-    "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:0;opacity:0";
+    "position:fixed;top:-9999px;left:-9999px;width:0;height:0;border:0;opacity:0";
   document.body.appendChild(iframe);
+
   const doc = iframe.contentDocument ?? iframe.contentWindow?.document;
   if (!doc) {
     document.body.removeChild(iframe);
     return;
   }
-  doc.open();
-  doc.write(html);
-  doc.close();
-  // Wait for images/fonts to load then print
-  iframe.contentWindow?.addEventListener("load", () => {
+
+  function doPrint() {
     try {
       iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
-    } finally {
-      setTimeout(() => {
-        if (document.body.contains(iframe)) document.body.removeChild(iframe);
-      }, 3000);
+    } catch {}
+    // Remove after print dialog closes
+    if (iframe.contentWindow) {
+      iframe.contentWindow.addEventListener(
+        "afterprint",
+        () => {
+          if (document.body.contains(iframe)) document.body.removeChild(iframe);
+        },
+        { once: true },
+      );
     }
-  });
-  // Fallback if load already fired
+    // Fallback cleanup after 30 seconds
+    setTimeout(() => {
+      if (document.body.contains(iframe)) document.body.removeChild(iframe);
+    }, 30000);
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  // Use onload for reliable cross-browser timing
+  iframe.onload = () => doPrint();
+  // Fallback if onload already fired (synchronous write)
   setTimeout(() => {
-    if (iframe.contentWindow && document.body.contains(iframe)) {
-      try {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      } catch {}
-      setTimeout(() => {
-        if (document.body.contains(iframe)) document.body.removeChild(iframe);
-      }, 3000);
-    }
-  }, 600);
+    if (document.body.contains(iframe)) doPrint();
+  }, 500);
 }
 
 // ── Shared Download Options Dialog ───────────────────────────────────────────

@@ -1,0 +1,36 @@
+// alert.did — Candid interface for the alert-data canister
+// Clinical alerts: Sepsis, AKI, NEWS2, hypoglycemia, hypertensive urgency
+
+type PatientId = text;
+type AlertId   = text;
+type Timestamp = int;
+
+type ClinicalAlert = record {
+  id          : AlertId;
+  patientId   : PatientId;
+  alertType   : text;  // "Sepsis" | "AKI" | "NEWS2" | "Hypoglycemia" | "HypertensiveUrgency"
+  severity    : text;  // "Low" | "Medium" | "High" | "Critical"
+  score       : opt float64;
+  message     : text;
+  acknowledged : bool;
+  createdAt   : Timestamp;
+};
+
+type VitalsInput = record {
+  systolicBp  : nat;
+  diastolicBp : nat;
+  pulse       : nat;
+  spo2        : nat;
+  temperature : float64;
+  rbs         : opt nat;
+  rr          : nat;
+  gcs         : opt nat;
+};
+
+service : {
+  evaluateVitals    : (PatientId, VitalsInput) -> (vec ClinicalAlert);
+  listAlerts        : (PatientId)              -> (vec ClinicalAlert) query;
+  listActiveAlerts  : (PatientId)              -> (vec ClinicalAlert) query;
+  acknowledgeAlert  : (AlertId)                -> (bool);
+  getNews2Score     : (VitalsInput)            -> (nat)               query;
+};

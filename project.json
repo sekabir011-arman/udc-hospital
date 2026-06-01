@@ -1,28 +1,23 @@
 {
-  "overview": "Dr. Arman Kabir's Care is a comprehensive bilingual (English/Bangla) Patient Management and Doctor Portal for clinics and hospitals. It supports OPD and inpatient workflows with role-based dashboards for Consultant, MO, Nurse, Reception, and Admin. Features include patient registration, visit management, prescriptions with clinical intelligence, medication tracking, inpatient daily progress (SOAP), discharge summaries, emergency prescriptions, bed management, payment processing, and real-time sync across devices.",
+  "overview": "A comprehensive bilingual Patient Management and Doctor Portal for clinics and hospitals, with 8 domain-focused backend canisters for patient data, clinical records, admissions, appointments, queue, alerts, auth, and sync.",
   "features": [
-    "Role-based dashboards with clinical action centers",
-    "Medication Administration Record (MAR) with per-dose tracking",
-    "Discharge Summary Generator with auto-compiled clinical data",
-    "Clinical Alerts Engine (Sepsis, AKI, NEWS2, Hypoglycemia, Hypertensive urgency)",
-    "Referral Letter Generator with printable PDF",
-    "Procedure Log with consent tracking",
-    "Digital Consent Forms with signature capture",
-    "Patient Timeline View — all events chronologically",
-    "Teleconsult Note from patient chat",
-    "Audit Dashboard for Admin with visual charts",
-    "Printable Patient Summary Card with QR code",
-    "Ward Round efficiency tools (Quick Review, Bedside Checklist, Round Summary)"
+    "Multi-canister backend with patient, clinical, admission, appointment, queue, alert, auth, and sync domains",
+    "Role-based access control with 13 staff roles",
+    "Ward round SOAP notes with Intern-MO-Consultant workflow",
+    "Bed management with ICU/HDU/General type flags",
+    "Clinical alerts for Sepsis, AKI, and NEWS2",
+    "Bilingual English/Bangla public landing page with admin-editable content",
+    "Investigation receipts with downloadable PDFs",
+    "Real-time sync across all devices with build-time canister ID embedding"
   ],
   "category": "healthcare",
   "tags": [
     "healthcare",
-    "emr",
-    "patient-management",
-    "clinical",
     "hospital",
-    "bilingual",
-    "offline-first"
+    "clinical",
+    "patient-management",
+    "multi-canister",
+    "bilingual"
   ],
-  "last_updated": "2026-04-28T16:48:32.596Z"
+  "last_updated": "2026-06-01T00:35:28.768Z"
 }
