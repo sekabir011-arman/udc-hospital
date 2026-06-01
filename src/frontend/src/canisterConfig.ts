@@ -1,5 +1,5 @@
 // Auto-generated at build time by vite.config.js — do not edit manually
-// Generated: 2026-06-01T00:52:06.398Z
+// Generated: 2026-06-01T08:27:33.502Z
 
 export const CANISTER_IDS = {
   patientData:     "",
