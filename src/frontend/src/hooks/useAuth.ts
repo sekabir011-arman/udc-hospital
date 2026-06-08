@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { getApiUrl } from '@/lib/apiUrl';
 
 export interface LoginCredentials {
   email: string;
@@ -23,10 +24,6 @@ export const useAuth = () => {
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const getApiUrl = () =>
-    import.meta.env.VITE_API_URL ||
-    (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000');
 
   const login = useCallback(async (credentials: LoginCredentials) => {
     setLoading(true);

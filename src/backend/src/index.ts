@@ -6,6 +6,7 @@ import authRoutes from './routes/auth.js';
 import patientsRoutes from './routes/patients.js';
 import vitalsRoutes from './routes/vitals.js';
 import appointmentsRoutes from './routes/appointments.js';
+import storageRoutes from './routes/storage.js';
 import { authMiddleware } from './middleware/auth.js';
 
 dotenv.config();
@@ -27,6 +28,7 @@ app.get('/health', (req, res) => {
 
 // Public routes
 app.use('/api/auth', authRoutes);
+app.use('/api/storage', storageRoutes);
 
 // Protected routes
 app.use('/api/patients', authMiddleware, patientsRoutes);

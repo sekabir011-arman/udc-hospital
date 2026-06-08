@@ -34,6 +34,12 @@ import {
 import type { DoctorAccount, PatientAccount } from "../../hooks/useEmailAuth";
 import { STAFF_ROLE_LABELS } from "../../types";
 import type { StaffRole } from "../../types";
+import {
+  getPendingUsers,
+  approveUser,
+  rejectUser,
+  updateUserStatus,
+} from "@/lib/adminApi";
 
 function getTotalPatients(): number {
   let count = 0;
@@ -120,11 +126,15 @@ export default function AdminDashboard() {
   );
   const [, setRefreshTick] = useState(0);
 
-  const refresh = useCallback(() => {
-    setPendingStaff(loadRegistry().filter((d) => d.status === "pending"));
-    setPendingPatients(
-      loadPatientRegistry().filter((p) => p.status === "pending"),
-    );
+  const refresh = useCallback(async () => {
+    try {
+      const pendingStaff = await getPendingUsers();
+      setPendingStaff(pendingStaff || []);
+    } catch {
+      setPendingStaff(loadRegistry().filter((d) => d.status === "pending"));
+    }
+
+    setPendingPatients(loadPatientRegistry().filter((p) => p.status === "pending"));
     setRefreshTick((t) => t + 1);
   }, []);
 
@@ -145,50 +155,45 @@ export default function AdminDashboard() {
   const visitsThisWeek = useMemo(getVisitsThisWeek, []);
   const topActions = useMemo(getTopActionsThisWeek, []);
 
-  const approveStaff = (acc: DoctorAccount) => {
-    const role = approvalRoles[acc.id] ?? acc.role ?? "doctor";
-    const reg = loadRegistry();
-    const idx = reg.findIndex((d) => d.id === acc.id);
-    if (idx >= 0) {
-      reg[idx] = { ...reg[idx], status: "approved", role };
-      saveRegistry(reg);
+  const approveStaff = async (acc: DoctorAccount) => {
+    try {
+      await approveUser(acc.id);
       refresh();
       toast.success(
-        `${acc.name} approved as ${STAFF_ROLE_LABELS[role as keyof typeof STAFF_ROLE_LABELS] ?? role}`,
+        `${acc.name} approved as ${STAFF_ROLE_LABELS[acc.role as keyof typeof STAFF_ROLE_LABELS] ?? acc.role}`,
       );
+    } catch {
+      toast.error("Failed to approve staff. Please login as admin and try again.");
     }
   };
 
-  const rejectStaff = (id: string) => {
-    const reg = loadRegistry();
-    const idx = reg.findIndex((d) => d.id === id);
-    if (idx >= 0) {
-      reg[idx] = { ...reg[idx], status: "rejected" };
-      saveRegistry(reg);
+  const rejectStaff = async (id: string) => {
+    try {
+      await rejectUser(id);
       refresh();
       toast.success("Account rejected");
+    } catch {
+      toast.error("Failed to reject staff. Please login as admin and try again.");
     }
   };
 
-  const approvePatient = (id: string) => {
-    const reg = loadPatientRegistry();
-    const idx = reg.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      reg[idx] = { ...reg[idx], status: "approved" };
-      savePatientRegistry(reg);
+  const approvePatient = async (id: string) => {
+    try {
+      await updateUserStatus(id, "active");
       refresh();
       toast.success("Patient account approved");
+    } catch {
+      toast.error("Failed to approve patient. Please login as admin and try again.");
     }
   };
 
-  const rejectPatient = (id: string) => {
-    const reg = loadPatientRegistry();
-    const idx = reg.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      reg[idx] = { ...reg[idx], status: "rejected" };
-      savePatientRegistry(reg);
+  const rejectPatient = async (id: string) => {
+    try {
+      await updateUserStatus(id, "rejected");
       refresh();
       toast.success("Patient account rejected");
+    } catch {
+      toast.error("Failed to reject patient. Please login as admin and try again.");
     }
   };
 

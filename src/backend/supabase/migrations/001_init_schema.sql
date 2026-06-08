@@ -5,13 +5,23 @@ create extension if not exists "uuid-ossp";
 create type public.user_role as enum (
   'admin',
   'consultant',
-  'registrar',
+  'consultant_doctor',
+  'doctor',
+  'assistant_professor',
+  'associate_professor',
+  'professor',
   'medical_officer',
+  'assistant_registrar',
+  'registrar',
   'intern',
+  'intern_doctor',
   'nurse',
   'reception',
+  'staff',
   'patient'
 );
+
+create type public.user_status as enum ('pending', 'active', 'approved', 'rejected', 'disabled');
 
 create type public.patient_gender as enum ('M', 'F', 'O');
 create type public.appointment_status as enum ('scheduled', 'completed', 'cancelled', 'no_show');
@@ -45,6 +55,7 @@ create table public.users (
   email text not null unique,
   name text not null,
   role public.user_role not null,
+  status public.user_status default 'pending',
   phone text,
   avatar_url text,
   created_at timestamp with time zone default now(),
@@ -366,6 +377,17 @@ create table public.money_receipts (
 
 create trigger trg_money_receipts_updated_at
 before update on public.money_receipts
+for each row execute function public.set_updated_at();
+
+-- Application storage table for generic frontend persistence
+create table public.app_storage (
+  key text primary key,
+  value jsonb not null,
+  updated_at timestamp with time zone default now()
+);
+
+create trigger trg_app_storage_updated_at
+before update on public.app_storage
 for each row execute function public.set_updated_at();
 
 -- Serial queue entries table

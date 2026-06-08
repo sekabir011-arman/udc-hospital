@@ -14,7 +14,12 @@ export function authMiddleware(req: AuthenticatedRequest, res: Response, next: N
     }
 
     const token = authHeader.slice(7);
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'secret') as any;
+    const jwtSecret = process.env.JWT_SECRET;
+    if (!jwtSecret) {
+      return res.status(500).json({ error: 'Missing JWT_SECRET in backend configuration', code: 'SERVER_ERROR' });
+    }
+
+    const decoded = jwt.verify(token, jwtSecret) as any;
 
     req.userId = decoded.sub;
     req.userRole = decoded.role;

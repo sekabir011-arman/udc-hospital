@@ -3597,7 +3597,7 @@ export default function LandingPage({
       <section
         className="relative overflow-hidden"
         style={{
-          background: "linear-gradient(135deg, #1d4ed8 0%, #0d9488 100%)",
+          background: "linear-gradient(135deg, #7c3aed 0%, #ec4899 35%, #f97316 65%, #06b6d4 100%)",
         }}
         data-ocid="landing.hero.section"
       >
@@ -3634,16 +3634,16 @@ export default function LandingPage({
             <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold text-white mb-3 leading-tight drop-shadow-lg">
               {siteConfig.heroSection.taglineEn}
             </h1>
-            <p className="text-blue-100 text-xl sm:text-2xl font-semibold mb-2">
+            <p className="text-white/95 text-xl sm:text-2xl font-semibold mb-2">
               {siteConfig.heroSection.subheadingEn}
             </p>
             {siteConfig.heroSection.heroTaglineEn && (
-              <p className="text-blue-200 text-base sm:text-lg italic font-medium mb-3">
+              <p className="text-white/85 text-base sm:text-lg italic font-medium mb-3">
                 {siteConfig.heroSection.heroTaglineEn}
               </p>
             )}
             {siteConfig.heroSection.heroDescriptionEn ? (
-              <p className="text-blue-100/90 text-sm sm:text-base max-w-2xl mx-auto mb-8">
+              <p className="text-white/80 text-sm sm:text-base max-w-2xl mx-auto mb-8">
                 {siteConfig.heroSection.heroDescriptionEn}
               </p>
             ) : (

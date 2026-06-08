@@ -64,6 +64,7 @@ import {
   useInactivityTimer,
 } from "./hooks/useEmailAuth";
 import type { DoctorAccount, PatientAccount } from "./hooks/useEmailAuth";
+import { approveUser, getPendingUsers, rejectUser, updateUserStatus } from "@/lib/adminApi";
 import { useMigration } from "./hooks/useMigration";
 import { getCanisterActor, setCanisterActor } from "./hooks/useQueries";
 
@@ -809,11 +810,14 @@ function PendingApprovalsPanel() {
   );
   const [reassignMap, setReassignMap] = useState<Record<string, StaffRole>>({});
 
-  const refresh = useCallback(() => {
-    setStaffAccounts(loadRegistry().filter((d) => d.status === "pending"));
-    setPatientAccounts(
-      loadPatientRegistry().filter((p) => p.status === "pending"),
-    );
+  const refresh = useCallback(async () => {
+    try {
+      const pendingStaff = await getPendingUsers();
+      setStaffAccounts(pendingStaff || []);
+    } catch {
+      setStaffAccounts(loadRegistry().filter((d) => d.status === "pending"));
+    }
+    setPatientAccounts(loadPatientRegistry().filter((p) => p.status === "pending"));
   }, []);
 
   useEffect(() => {
@@ -822,50 +826,56 @@ function PendingApprovalsPanel() {
     return () => clearInterval(iv);
   }, [refresh]);
 
-  const approveStaff = (acc: DoctorAccount) => {
-    const role = approvalRoles[acc.id] ?? acc.role ?? "doctor";
-    const reg = loadRegistry();
-    const idx = reg.findIndex((d) => d.id === acc.id);
-    if (idx >= 0) {
-      reg[idx] = { ...reg[idx], status: "approved", role };
-      saveRegistry(reg);
+  const approveStaff = async (acc: DoctorAccount) => {
+    try {
+      await approveUser(acc.id);
       refresh();
       import("sonner").then(({ toast }) =>
-        toast.success(`Account approved as ${STAFF_ROLE_LABELS[role]}`),
+        toast.success(`Account approved as ${STAFF_ROLE_LABELS[acc.role] ?? acc.role}`),
+      );
+    } catch {
+      import("sonner").then(({ toast }) =>
+        toast.error("Failed to approve staff. Please login as admin and try again."),
       );
     }
   };
-  const rejectStaff = (id: string) => {
-    const reg = loadRegistry();
-    const idx = reg.findIndex((d) => d.id === id);
-    if (idx >= 0) {
-      reg[idx] = { ...reg[idx], status: "rejected" };
-      saveRegistry(reg);
+
+  const rejectStaff = async (id: string) => {
+    try {
+      await rejectUser(id);
       refresh();
       import("sonner").then(({ toast }) => toast.success("Account rejected"));
+    } catch {
+      import("sonner").then(({ toast }) =>
+        toast.error("Failed to reject staff. Please login as admin and try again."),
+      );
     }
   };
-  const approvePatient = (id: string) => {
-    const reg = loadPatientRegistry();
-    const idx = reg.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      reg[idx] = { ...reg[idx], status: "approved" };
-      savePatientRegistry(reg);
+
+  const approvePatient = async (id: string) => {
+    try {
+      await updateUserStatus(id, "active");
       refresh();
       import("sonner").then(({ toast }) =>
         toast.success("Patient account approved"),
       );
+    } catch {
+      import("sonner").then(({ toast }) =>
+        toast.error("Failed to approve patient. Please login as admin and try again."),
+      );
     }
   };
-  const rejectPatient = (id: string) => {
-    const reg = loadPatientRegistry();
-    const idx = reg.findIndex((p) => p.id === id);
-    if (idx >= 0) {
-      reg[idx] = { ...reg[idx], status: "rejected" };
-      savePatientRegistry(reg);
+
+  const rejectPatient = async (id: string) => {
+    try {
+      await updateUserStatus(id, "rejected");
       refresh();
       import("sonner").then(({ toast }) =>
         toast.success("Patient account rejected"),
+      );
+    } catch {
+      import("sonner").then(({ toast }) =>
+        toast.error("Failed to reject patient. Please login as admin and try again."),
       );
     }
   };
@@ -1789,10 +1799,10 @@ function AppInner() {
     window.location.pathname === "/serial-display";
   if (isSerialDisplay) return <SerialDisplay />;
 
-  const handleAdminLogin = (e: React.FormEvent) => {
+  const handleAdminLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setAdminError("");
-    const ok = adminLogin(adminUser, adminPass);
+    const ok = await adminLogin(adminUser, adminPass);
     if (ok) {
       setShowAdminModal(false);
       setAdminUser("");

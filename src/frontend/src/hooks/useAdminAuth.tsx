@@ -1,15 +1,11 @@
 import { useCallback, useState } from "react";
-
-const ADMIN_ACCOUNTS = [
-  { username: "dr.armankabir011@gmail.com", password: "01197247219" },
-  { username: "admin2", password: "admin2" },
-];
+import { getApiUrl } from "@/lib/apiUrl";
 
 const STORAGE_KEY = "adminSession";
 
 function loadSession(): boolean {
   try {
-    return localStorage.getItem(STORAGE_KEY) === "true";
+    return Boolean(localStorage.getItem("auth_token"));
   } catch {
     return false;
   }
@@ -19,14 +15,28 @@ export function useAdminAuth() {
   const [isAdmin, setIsAdmin] = useState<boolean>(loadSession);
 
   const adminLogin = useCallback(
-    (username: string, password: string): boolean => {
-      const match = ADMIN_ACCOUNTS.find(
-        (a) => a.username === username && a.password === password,
-      );
-      if (match) {
-        localStorage.setItem(STORAGE_KEY, "true");
-        setIsAdmin(true);
-        return true;
+    async (username: string, password: string): Promise<boolean> => {
+      const apiUrl = getApiUrl();
+      try {
+        const response = await fetch(`${apiUrl}/api/auth/login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: username, password }),
+        });
+
+        if (!response.ok) {
+          return false;
+        }
+
+        const data = await response.json();
+        if (data.user?.role === "admin" && data.token) {
+          localStorage.setItem("auth_token", data.token);
+          localStorage.setItem(STORAGE_KEY, "true");
+          setIsAdmin(true);
+          return true;
+        }
+      } catch {
+        return false;
       }
       return false;
     },
@@ -35,6 +45,7 @@ export function useAdminAuth() {
 
   const adminLogout = useCallback(() => {
     localStorage.removeItem(STORAGE_KEY);
+    localStorage.removeItem("auth_token");
     setIsAdmin(false);
   }, []);
 

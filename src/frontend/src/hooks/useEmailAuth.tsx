@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import type { StaffRole } from "../types";
+import { getApiUrl } from "@/lib/apiUrl";
 
 const REGISTRY_KEY = "medicare_doctors_registry";
 const SESSION_KEY = "medicare_current_doctor";
@@ -193,6 +194,7 @@ interface EmailAuthContextValue {
   updateProfile: (
     data: Partial<Omit<DoctorAccount, "id" | "passwordHash" | "createdAt">>,
   ) => void;
+  backendSignIn: (email: string, password: string) => Promise<void>;
   getPendingAccounts: () => DoctorAccount[];
   approveAccount: (id: string) => void;
   approveAccountWithRole: (id: string, role: StaffRole) => void;
@@ -271,37 +273,55 @@ export function EmailAuthProvider({ children }: { children: React.ReactNode }) {
         const existing = registry.find(
           (d) => d.email.toLowerCase() === data.email.toLowerCase(),
         );
-        if (existing) {
-          if (existing.status === "rejected") {
-            const idx = registry.findIndex((d) => d.id === existing.id);
-            const { password, ...rest } = data;
-            registry[idx] = {
-              ...rest,
-              id: existing.id,
-              passwordHash: hashPassword(data.email, password),
-              createdAt: new Date().toISOString(),
-              status: "pending",
-            };
-            saveRegistry(registry);
-            throw new Error(
-              "Your account has been re-submitted for approval. Please wait for admin approval.",
-            );
-          }
+        if (existing && existing.status !== "rejected") {
           throw new Error("This email is already registered in the system.");
         }
-        const { password, ...rest } = data;
-        const newDoctor: DoctorAccount = {
-          ...rest,
-          id: Date.now().toString(36) + Math.random().toString(36).slice(2),
-          passwordHash: hashPassword(data.email, password),
+
+        const apiUrl = getApiUrl();
+        const response = await fetch(`${apiUrl}/api/auth/signup`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: data.email,
+            password: data.password,
+            name: data.name,
+            role: data.role,
+          }),
+        });
+
+        const result = await response.json().catch(() => null);
+        if (!response.ok) {
+          throw new Error(result?.error || "Signup failed. Please try again.");
+        }
+
+        const profileId = result?.user?.id ?? existing?.id ?? Date.now().toString(36) + Math.random().toString(36).slice(2);
+        const record: DoctorAccount = {
+          ...data,
+          id: profileId,
+          passwordHash: hashPassword(data.email, data.password),
           createdAt: new Date().toISOString(),
-          status: "pending",
+          status: existing?.status === "rejected" ? "pending" : "pending",
         };
-        registry.push(newDoctor);
+
+        const existingIndex = registry.findIndex((d) => d.id === profileId);
+        if (existingIndex >= 0) {
+          registry[existingIndex] = { ...registry[existingIndex], ...record };
+        } else {
+          registry.push(record);
+        }
         saveRegistry(registry);
-        throw new Error(
-          "Account created! Please wait for admin approval before logging in.",
-        );
+
+        if (response.status === 202 || result?.status === "pending_approval") {
+          throw new Error(
+            result?.message ||
+              "Account created! Please wait for admin approval before logging in.",
+          );
+        }
+
+        if (result?.token && result.user?.role !== "patient") {
+          localStorage.setItem("auth_token", result.token);
+        }
+        return result;
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : "Sign up failed.";
         setAuthError(msg);
@@ -313,15 +333,118 @@ export function EmailAuthProvider({ children }: { children: React.ReactNode }) {
     [],
   );
 
+  const setDoctorSession = useCallback((doctor: DoctorAccount) => {
+    localStorage.setItem(SESSION_KEY, doctor.id);
+    localStorage.setItem(CANONICAL_EMAIL_KEY, doctor.email);
+    setCurrentDoctor(doctor);
+    appendAuditLog({
+      timestamp: new Date().toISOString(),
+      userRole: doctor.role,
+      userName: doctor.name,
+      action: "Logged in",
+      target: "System",
+    });
+  }, []);
+
   const signIn = useCallback(async (email: string, password: string) => {
     setIsLoggingIn(true);
     setAuthError(null);
     try {
+      const apiUrl = getApiUrl();
+      const endpoint = `${apiUrl}/api/auth/login`;
+      let backendError: Error | null = null;
+
+      if (typeof window !== "undefined") {
+        try {
+          const response = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+
+          if (response.ok) {
+            const data = (await response.json()) as {
+              user: { id: string; email: string; name: string; role: string };
+              token?: string;
+            };
+            if (data.user.role === "patient") {
+              throw new Error("Please use the patient login form for patient accounts.");
+            }
+
+            // Store JWT token for admin API calls
+            if (data.token) {
+              localStorage.setItem("auth_token", data.token);
+            }
+
+            const registry = loadRegistry();
+            const existingIndex = registry.findIndex(
+              (d) => d.email.toLowerCase() === email.toLowerCase(),
+            );
+            const mappedDoctor: DoctorAccount = {
+              id: data.user.id,
+              email: data.user.email,
+              passwordHash: hashPassword(email, password),
+              name: data.user.name,
+              designation: "",
+              degree: "",
+              specialization: "",
+              hospital: "",
+              phone: "",
+              createdAt: new Date().toISOString(),
+              role: data.user.role as StaffRole,
+              status: "approved",
+            };
+            if (existingIndex >= 0) {
+              const existing = registry[existingIndex];
+              registry[existingIndex] = {
+                ...existing,
+                ...mappedDoctor,
+                designation: existing.designation || mappedDoctor.designation,
+                degree: existing.degree || mappedDoctor.degree,
+                specialization:
+                  existing.specialization || mappedDoctor.specialization,
+                hospital: existing.hospital || mappedDoctor.hospital,
+                phone: existing.phone || mappedDoctor.phone,
+                createdAt: existing.createdAt || mappedDoctor.createdAt,
+                status: "approved",
+              };
+            } else {
+              registry.push(mappedDoctor);
+            }
+            saveRegistry(registry);
+            setDoctorSession(registry[existingIndex] ?? mappedDoctor);
+            return;
+          }
+
+          const result = await response.json().catch(() => null);
+          backendError = new Error(
+            result?.error || "Backend login failed. Please check your credentials.",
+          );
+          // Throw backend errors for invalid credentials and approval status
+          if (response.status === 401 || response.status === 403 || response.status === 404) {
+            throw backendError;
+          }
+        } catch (error: unknown) {
+          if (
+            error instanceof Error &&
+            !error.message.includes("Failed to fetch") &&
+            !error.message.includes("NetworkError") &&
+            !error.message.includes("request to")
+          ) {
+            throw error;
+          }
+          backendError = error instanceof Error ? error : new Error("Backend login unavailable");
+        }
+      }
+
+      // Local fallback when backend is unavailable.
       const registry = loadRegistry();
       const doctor = registry.find(
         (d) => d.email.toLowerCase() === email.toLowerCase(),
       );
-      if (!doctor) throw new Error("No account found with this email.");
+      if (!doctor) {
+        throw backendError ?? new Error("No account found with this email.");
+      }
       if (doctor.passwordHash !== hashPassword(email, password))
         throw new Error("Incorrect password.");
       if (doctor.status === "pending")
@@ -330,16 +453,7 @@ export function EmailAuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(
           "Your account has been rejected. Please contact the admin or re-register.",
         );
-      localStorage.setItem(SESSION_KEY, doctor.id);
-      localStorage.setItem(CANONICAL_EMAIL_KEY, doctor.email);
-      setCurrentDoctor(doctor);
-      appendAuditLog({
-        timestamp: new Date().toISOString(),
-        userRole: doctor.role,
-        userName: doctor.name,
-        action: "Logged in",
-        target: "System",
-      });
+      setDoctorSession(doctor);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Sign in failed.";
       setAuthError(msg);
@@ -347,7 +461,7 @@ export function EmailAuthProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsLoggingIn(false);
     }
-  }, []);
+  }, [setDoctorSession]);
 
   const signOut = useCallback(() => {
     if (currentDoctor) {
@@ -361,6 +475,7 @@ export function EmailAuthProvider({ children }: { children: React.ReactNode }) {
     }
     localStorage.removeItem(SESSION_KEY);
     localStorage.removeItem(CANONICAL_EMAIL_KEY);
+    localStorage.removeItem("auth_token");
     setCurrentDoctor(null);
     setAuthError(null);
   }, [currentDoctor]);
@@ -755,6 +870,7 @@ export function EmailAuthProvider({ children }: { children: React.ReactNode }) {
         approvePatient,
         rejectPatient,
         updatePatientCredentials,
+        backendSignIn: signIn,
       }}
     >
       {children}

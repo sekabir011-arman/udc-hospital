@@ -1,5 +1,6 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { saveFrontPageContentWithSync } from "../lib/hybridStorage";
+import { getStorageValue, setStorageValue } from "@/lib/storageApi";
 
 export interface SocialLink {
   label: string;
@@ -160,6 +161,13 @@ function loadConfig(): SiteConfig {
 
 function saveConfig(cfg: SiteConfig, actor?: unknown) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
+  void (async () => {
+    try {
+      await setStorageValue(STORAGE_KEY, cfg);
+    } catch (error) {
+      console.warn("Failed to save site config to backend storage:", error);
+    }
+  })();
   // Sync to canister so all devices see the latest front page content
   saveFrontPageContentWithSync(actor ?? null);
 }
@@ -179,6 +187,18 @@ function resolveActor(): unknown | null {
 
 export function useSiteConfig() {
   const [config, setConfig] = useState<SiteConfig>(loadConfig);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      const remote = await getStorageValue<SiteConfig>(STORAGE_KEY);
+      if (cancelled || !remote?.value) return;
+      setConfig((prev) => deepMerge(prev, remote.value as Partial<SiteConfig>));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const updateHero = useCallback((hero: Partial<HeroSection>) => {
     setConfig((prev) => {
