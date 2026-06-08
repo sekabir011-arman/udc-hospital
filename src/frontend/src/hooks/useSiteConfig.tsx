@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
 import { saveFrontPageContentWithSync } from "../lib/hybridStorage";
 
 export interface SocialLink {
@@ -159,9 +159,80 @@ function loadConfig(): SiteConfig {
 }
 
 function saveConfig(cfg: SiteConfig, actor?: unknown) {
+  // Always save to localStorage for offline access
   localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
-  // Sync to canister so all devices see the latest front page content
+  
+  // Also sync to backend via API if available
+  syncToBackendAPI(cfg);
+  
+  // And sync to canister
   saveFrontPageContentWithSync(actor ?? null);
+}
+
+// Helper: sync configuration to backend API
+async function syncToBackendAPI(cfg: SiteConfig) {
+  try {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      // Not logged in, skip backend sync
+      return;
+    }
+
+    const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    
+    // Sync each section to backend
+    const sections: Array<{section: keyof SiteConfig; data: unknown}> = [
+      { section: 'heroSection', data: cfg.heroSection },
+      { section: 'aboutSection', data: cfg.aboutSection },
+      { section: 'footerSection', data: cfg.footerSection },
+      { section: 'emergencyContacts', data: cfg.emergencyContacts },
+    ];
+
+    for (const { section, data } of sections) {
+      try {
+        await fetch(`${backendUrl}/api/config/${section}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            config: data,
+            reason: 'Updated via admin panel',
+          }),
+        });
+      } catch (err) {
+        console.warn(`[sync] Failed to sync ${section} to backend:`, err);
+        // Don't fail if backend sync fails - localStorage is the source of truth
+      }
+    }
+  } catch (err) {
+    console.warn('[sync] Failed to sync config to backend:', err);
+  }
+}
+
+// Helper: fetch configuration from backend
+async function fetchConfigFromBackend(): Promise<Partial<SiteConfig> | null> {
+  try {
+    const backendUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const response = await fetch(`${backendUrl}/api/config`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      console.warn('[sync] Failed to fetch config from backend:', response.status);
+      return null;
+    }
+
+    const data = await response.json() as Record<string, unknown>;
+    return data as Partial<SiteConfig>;
+  } catch (err) {
+    console.warn('[sync] Failed to fetch config from backend:', err);
+    return null;
+  }
 }
 
 // Helper: resolve canister actor at call time (avoids import cycle)
@@ -179,6 +250,22 @@ function resolveActor(): unknown | null {
 
 export function useSiteConfig() {
   const [config, setConfig] = useState<SiteConfig>(loadConfig);
+
+  // On mount, try to sync from backend
+  useEffect(() => {
+    const syncFromBackend = async () => {
+      const backendConfig = await fetchConfigFromBackend();
+      if (backendConfig) {
+        // Merge backend config with local config
+        const merged = deepMerge(config, backendConfig);
+        setConfig(merged);
+        // Update localStorage with backend data
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
+      }
+    };
+
+    syncFromBackend();
+  }, []);
 
   const updateHero = useCallback((hero: Partial<HeroSection>) => {
     setConfig((prev) => {
