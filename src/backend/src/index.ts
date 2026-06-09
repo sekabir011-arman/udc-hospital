@@ -6,6 +6,8 @@ import authRoutes from './routes/auth.js';
 import patientsRoutes from './routes/patients.js';
 import vitalsRoutes from './routes/vitals.js';
 import appointmentsRoutes from './routes/appointments.js';
+import prescriptionsRoutes from './routes/prescriptions.js';
+import nurseAssignmentsRoutes from './routes/nurseAssignments.js';
 import configRoutes from './routes/config.js';
 import { authMiddleware } from './middleware/auth.js';
 
@@ -34,6 +36,8 @@ app.use('/api/config', configRoutes);
 app.use('/api/patients', authMiddleware, patientsRoutes);
 app.use('/api/vitals', authMiddleware, vitalsRoutes);
 app.use('/api/appointments', authMiddleware, appointmentsRoutes);
+app.use('/api/prescriptions', authMiddleware, prescriptionsRoutes);
+app.use('/api/nurse-assignments', authMiddleware, nurseAssignmentsRoutes);
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

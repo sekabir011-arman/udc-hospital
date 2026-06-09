@@ -6,8 +6,8 @@
 // You should NOT make any changes in this file as it will be overwritten.
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
-import { Actor, HttpAgent, type HttpAgentOptions, type ActorConfig, type Agent, type ActorSubclass } from "@icp-sdk/core/agent";
-import type { Principal } from "@icp-sdk/core/principal";
+import { Actor, HttpAgent, type HttpAgentOptions, type ActorConfig, type Agent, type ActorSubclass } from "./lib/icp-stubs";
+import type { Principal } from "./lib/icp-stubs";
 import { idlFactory, type _SERVICE } from "./declarations/backend.did";
 export interface Some<T> {
     __kind__: "Some";

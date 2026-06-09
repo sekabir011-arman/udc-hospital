@@ -35,6 +35,12 @@ function fmtDate(iso?: string): string {
   });
 }
 
+function stripReceiptHeaderHtml(html: string): string {
+  return html
+    .replace(/<header[\s\S]*?<\/header>/gi, "")
+    .replace(/<(\/?)body[^>]*>/gi, "<$1div>");
+}
+
 // ── Receipt document (printable) ──────────────────────────────────────────────
 
 function WalkInReceiptDoc({

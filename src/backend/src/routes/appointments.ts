@@ -33,7 +33,7 @@ router.get('/patient/:patientId', async (req: AuthenticatedRequest, res) => {
 });
 
 // Create appointment
-router.post('/', requireRole('reception', 'medical_officer', 'consultant'), async (req: AuthenticatedRequest, res) => {
+router.post('/', requireRole('reception', 'medical_officer', 'consultant_doctor', 'doctor', 'assistant_professor', 'associate_professor', 'professor', 'registrar', 'assistant_registrar'), async (req: AuthenticatedRequest, res) => {
   try {
     const data = AppointmentSchema.parse(req.body);
     const supabase = getSupabaseClient();
@@ -57,7 +57,7 @@ router.post('/', requireRole('reception', 'medical_officer', 'consultant'), asyn
 });
 
 // Update appointment status
-router.patch('/:id/status', requireRole('reception', 'medical_officer', 'consultant'), async (req: AuthenticatedRequest, res) => {
+router.patch('/:id/status', requireRole('reception', 'medical_officer', 'consultant_doctor', 'doctor', 'assistant_professor', 'associate_professor', 'professor', 'registrar', 'assistant_registrar'), async (req: AuthenticatedRequest, res) => {
   try {
     const { status } = z.object({ status: z.enum(['scheduled', 'completed', 'cancelled', 'no_show']) }).parse(req.body);
     const supabase = getSupabaseClient();

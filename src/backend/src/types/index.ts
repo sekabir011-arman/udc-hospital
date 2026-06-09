@@ -2,7 +2,61 @@ export interface User {
   id: string;
   email: string;
   name: string;
-  role: 'admin' | 'consultant' | 'registrar' | 'medical_officer' | 'intern' | 'nurse' | 'reception' | 'patient';
+  role:
+    | 'admin'
+    | 'professor'
+    | 'associate_professor'
+    | 'assistant_professor'
+    | 'consultant_doctor'
+    | 'doctor'
+    | 'registrar'
+    | 'assistant_registrar'
+    | 'medical_officer'
+    | 'intern_doctor'
+    | 'nurse'
+    | 'reception'
+    | 'staff'
+    | 'patient';
+  department?: string;
+  unit?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface PatientAssignment {
+  id: string;
+  patientId: string;
+  nurseId: string;
+  assignmentRole: 'nurse' | 'intern_doctor' | 'medical_officer' | 'assistant_registrar' | 'registrar' | 'consultant';
+  department?: string;
+  unit?: string;
+  ward: string;
+  isPrimary: boolean;
+  isConsulting?: boolean;
+  active: boolean;
+  assignedBy?: string;
+  assignedByRole?: string;
+  assignedAt: Date;
+  startAt: Date;
+  endAt?: Date;
+  transferReason?: string;
+  handoverClinicalSummary?: string;
+  referralReason?: string;
+  referralRequestedBy?: string;
+  referralAt?: Date;
+  isEmergency?: boolean;
+  notificationSentAt?: Date;
+  referralStatus?: 'new' | 'pending_review' | 'accepted' | 'assessment' | 'recommendation_issued' | 'closed';
+  responseRequestedAt?: Date;
+  respondedAt?: Date;
+  assessmentAt?: Date;
+  recommendationIssuedAt?: Date;
+  closedAt?: Date;
+  handoverFrom?: string;
+  handoverTo?: string;
+  handoverNotes?: string;
+  handoverAt?: Date;
+  notes?: string;
   createdAt: Date;
   updatedAt: Date;
 }

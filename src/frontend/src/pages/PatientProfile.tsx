@@ -19,7 +19,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { Principal } from "@icp-sdk/core/principal";
+import type { Principal } from "../lib/icp-stubs";
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { format } from "date-fns";
 import {

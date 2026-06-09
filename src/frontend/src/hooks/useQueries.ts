@@ -1,4 +1,4 @@
-import type { Principal } from "@icp-sdk/core/principal";
+import type { Principal } from "../lib/icp-stubs";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { saveClinicalEntitiesWithSync } from "../lib/hybridStorage";
 import type {

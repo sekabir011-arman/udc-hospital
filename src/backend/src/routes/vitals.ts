@@ -60,7 +60,7 @@ router.post('/', requireRole('nurse', 'medical_officer', 'registrar'), async (re
 });
 
 // Verify vitals (update status)
-router.patch('/:id/verify', requireRole('medical_officer', 'registrar', 'consultant'), async (req: AuthenticatedRequest, res) => {
+router.patch('/:id/verify', requireRole('medical_officer', 'registrar', 'assistant_registrar', 'consultant_doctor', 'doctor', 'assistant_professor', 'associate_professor', 'professor'), async (req: AuthenticatedRequest, res) => {
   try {
     const supabase = getSupabaseClient();
     const { status } = z.object({ status: z.enum(['pending_review', 'verified', 'rejected']) }).parse(req.body);

@@ -4,7 +4,7 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import type { Principal } from "@icp-sdk/core/principal";
+import type { Principal } from "../lib/icp-stubs";
 import { format } from "date-fns";
 import {
   Activity,

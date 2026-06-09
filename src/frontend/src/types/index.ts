@@ -2,7 +2,7 @@
 // These types were previously imported from backend.d which is a protected stub.
 // All domain types live here.
 
-import type { Principal } from "@icp-sdk/core/principal";
+import type { Principal } from "../lib/icp-stubs";
 
 // ── Staff Role System ─────────────────────────────────────────────────────────
 export type StaffRole =

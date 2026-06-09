@@ -45,6 +45,20 @@ router.get('/:id', async (req: AuthenticatedRequest, res) => {
     if (error) throw error;
     if (!data) return res.status(404).json({ error: 'Patient not found', code: 'NOT_FOUND' });
 
+    const userHasDepartment = req.userDepartment && req.userRole !== 'admin';
+    const userHasUnit = req.userUnit && req.userRole !== 'admin';
+    const unitMatches =
+      userHasUnit &&
+      ['unit', 'ward'].some((field) => (data as any)[field] === req.userUnit);
+
+    if (userHasDepartment && data.department && data.department !== req.userDepartment && !unitMatches) {
+      return res.status(403).json({ error: 'Department access denied', code: 'FORBIDDEN' });
+    }
+
+    if (!userHasDepartment && userHasUnit && !unitMatches) {
+      return res.status(403).json({ error: 'Unit access denied', code: 'FORBIDDEN' });
+    }
+
     res.json(snakeToCamel(data));
   } catch (error: any) {
     res.status(500).json({ error: error.message, code: 'DATABASE_ERROR' });

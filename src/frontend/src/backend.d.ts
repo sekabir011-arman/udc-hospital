@@ -1,4 +1,4 @@
-import type { Principal } from "@icp-sdk/core/principal";
+import type { Principal } from "./lib/icp-stubs";
 export interface Some<T> {
     __kind__: "Some";
     value: T;
