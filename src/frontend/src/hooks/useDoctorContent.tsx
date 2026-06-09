@@ -1,9 +1,11 @@
 import { doctors } from "@/data/doctorsData";
 import type { DoctorKey } from "@/data/doctorsData";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { saveFrontPageContentWithSync } from "../lib/hybridStorage";
 
 const STORAGE_KEY = "doctorContentOverrides";
+
+const BACKEND_URL = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
 // Use any for override storage since content shape is dynamic
 type Overrides = Record<string, any>;
@@ -16,7 +18,28 @@ function loadOverrides(): Overrides {
   }
 }
 
-function saveOverrides(overrides: Overrides) {
+async function syncOverridesToBackend(overrides: Overrides) {
+  const token = localStorage.getItem("auth_token");
+  if (!token) return;
+
+  try {
+    await fetch(`${BACKEND_URL}/api/config/classroomContent`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        config: overrides,
+        reason: "Updated classroom content via settings",
+      }),
+    });
+  } catch (err) {
+    console.warn("[doctorContent] Failed to persist classroom content to backend:", err);
+  }
+}
+
+function saveOverrides(overrides: Overrides, syncToBackend = true) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
   // Sync to canister so all devices see the latest doctor content overrides
   try {
@@ -27,6 +50,25 @@ function saveOverrides(overrides: Overrides) {
     saveFrontPageContentWithSync(mod.getCanisterActor?.() ?? null);
   } catch {
     saveFrontPageContentWithSync(null);
+  }
+
+  if (syncToBackend) {
+    void syncOverridesToBackend(overrides);
+  }
+}
+
+async function fetchBackendOverrides(): Promise<Overrides | null> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/config/classroomContent`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as Record<string, unknown>;
+    return (data.classroomContent as Overrides) ?? null;
+  } catch (err) {
+    console.warn("[doctorContent] Failed to fetch classroom content from backend:", err);
+    return null;
   }
 }
 
@@ -53,6 +95,20 @@ function deepMerge(base: any, overrides: Record<string, any>): any {
 
 export function useDoctorContent() {
   const [overrides, setOverrides] = useState<Overrides>(loadOverrides);
+
+  useEffect(() => {
+    const loadBackendOverrides = async () => {
+      const backendOverrides = await fetchBackendOverrides();
+      if (!backendOverrides) return;
+
+      const localOverrides = loadOverrides();
+      const merged = deepMerge(backendOverrides, localOverrides);
+      setOverrides(merged);
+      saveOverrides(merged, false);
+    };
+
+    void loadBackendOverrides();
+  }, []);
 
   const getContent = useCallback(
     // returns merged doctor data shape

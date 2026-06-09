@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { supabase } from '@/lib/supabase';
+import type { StaffRole } from '../types';
 
 export interface LoginCredentials {
   email: string;
@@ -8,14 +8,14 @@ export interface LoginCredentials {
 
 export interface SignUpCredentials extends LoginCredentials {
   name: string;
-  role: 'admin' | 'consultant' | 'registrar' | 'medical_officer' | 'intern' | 'nurse' | 'reception' | 'patient';
+  role: StaffRole;
 }
 
 export interface User {
   id: string;
   email: string;
   name: string;
-  role: string;
+  role: StaffRole;
 }
 
 export const useAuth = () => {
@@ -89,7 +89,6 @@ export const useAuth = () => {
   const logout = useCallback(async () => {
     setLoading(true);
     try {
-      await supabase.auth.signOut();
       setUser(null);
       setToken(null);
       localStorage.removeItem('auth_token');

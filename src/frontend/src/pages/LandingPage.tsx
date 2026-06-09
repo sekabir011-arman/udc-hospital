@@ -5613,15 +5613,7 @@ export default function LandingPage({
             <p className="text-xs text-slate-400 text-center">
               © {new Date().getFullYear()}{" "}
               {siteConfig.footerSection.copyrightText} Built with{" "}
-              <Heart className="w-3 h-3 inline text-rose-400" /> using{" "}
-              <a
-                href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(typeof window !== "undefined" ? window.location.hostname : "")}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline hover:text-slate-200"
-              >
-                caffeine.ai
-              </a>
+              <Heart className="w-3 h-3 inline text-rose-400" /> on the Arman Care platform.
             </p>
             <button
               type="button"

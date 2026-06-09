@@ -35,10 +35,6 @@ self.addEventListener('fetch', (event) => {
   // Network-first for API calls and external URLs
   if (
     url.pathname.startsWith('/api') ||
-    url.hostname.includes('icp') ||
-    url.hostname.includes('dfinity') ||
-    url.hostname.includes('medex') ||
-    url.hostname.includes('whatsapp') ||
     url.hostname.includes('fonts.googleapis') ||
     url.hostname.includes('fonts.gstatic')
   ) {

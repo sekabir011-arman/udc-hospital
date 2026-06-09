@@ -56,6 +56,41 @@ function todayKeyLocal(): string {
   return `clinic_serials_${new Date().toISOString().slice(0, 10)}`;
 }
 
+async function fetchBackendSerialDisplayConfig(): Promise<Record<string, string> | null> {
+  try {
+    const backendUrl = import.meta.env.VITE_API_URL || "http://localhost:3000";
+    const response = await fetch(`${backendUrl}/api/config/serialDisplayVideo`, {
+      method: "GET",
+      headers: { "Content-Type": "application/json" },
+    });
+
+    if (!response.ok) return null;
+    const data = (await response.json()) as Record<string, unknown>;
+    const config = data.serialDisplayVideo as Record<string, string> | undefined;
+    return config ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function resolveVideoUrlFromConfig(config: Record<string, string> | null): string {
+  try {
+    const email = localStorage.getItem("app_current_user_email");
+    if (email && config?.[email]) {
+      return toDisplayEmbedUrl(config[email]);
+    }
+    if (config) {
+      const values = Object.values(config).filter((v) => typeof v === "string" && v.trim());
+      if (values.length > 0) {
+        return toDisplayEmbedUrl(values[0]);
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return DEFAULT_VIDEO_URL;
+}
+
 /** Returns true if the current logged-in user is a Consultant Doctor or Staff */
 function canAddWalkIn(): boolean {
   try {
@@ -661,11 +696,23 @@ function SerialDisplayInner() {
     }
   }, []);
 
+  useEffect(() => {
+    const loadVideoFromBackend = async () => {
+      const config = await fetchBackendSerialDisplayConfig();
+      if (config) {
+        setVideoUrl(resolveVideoUrlFromConfig(config));
+      }
+    };
+
+    void loadVideoFromBackend();
+  }, []);
+
   // Re-read video URL on tab visibility change (cross-device: doctor saves on phone, display picks up)
   useEffect(() => {
-    const onVisibility = () => {
+    const onVisibility = async () => {
       if (document.visibilityState === "visible") {
-        setVideoUrl(resolveVideoUrl());
+        const config = await fetchBackendSerialDisplayConfig();
+        setVideoUrl(config ? resolveVideoUrlFromConfig(config) : resolveVideoUrl());
       }
     };
     document.addEventListener("visibilitychange", onVisibility);

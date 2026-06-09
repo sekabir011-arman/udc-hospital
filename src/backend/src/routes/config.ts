@@ -52,7 +52,14 @@ router.get('/:section', async (req: Request, res: Response) => {
     const { section } = req.params;
 
     // Validate section name
-    const validSections = ['heroSection', 'aboutSection', 'footerSection', 'emergencyContacts'];
+    const validSections = [
+      'heroSection',
+      'aboutSection',
+      'footerSection',
+      'emergencyContacts',
+      'classroomContent',
+      'serialDisplayVideo',
+    ];
     if (!validSections.includes(section)) {
       return res.status(400).json({ error: 'Invalid section', code: 'INVALID_SECTION' });
     }
@@ -78,21 +85,37 @@ router.get('/:section', async (req: Request, res: Response) => {
 });
 
 // ────────────────────────────────────────────────────────────────────────────
-// POST /api/config/:section - Update specific section (ADMIN ONLY)
+// POST /api/config/:section - Update specific section (ADMIN ONLY for site config sections, 
+// consultant doctors may update classroomContent/serialDisplayVideo)
 // ────────────────────────────────────────────────────────────────────────────
 router.post(
   '/:section',
   authMiddleware,
-  requireRole('admin'),
   async (req: AuthenticatedRequest, res: Response) => {
     try {
       const { section } = req.params;
       const { config, reason } = req.body;
 
       // Validate section name
-      const validSections = ['heroSection', 'aboutSection', 'footerSection', 'emergencyContacts'];
+      const validSections = [
+        'heroSection',
+        'aboutSection',
+        'footerSection',
+        'emergencyContacts',
+        'classroomContent',
+        'serialDisplayVideo',
+      ];
       if (!validSections.includes(section)) {
         return res.status(400).json({ error: 'Invalid section', code: 'INVALID_SECTION' });
+      }
+
+      const allowedRoles =
+        section === 'classroomContent' || section === 'serialDisplayVideo'
+          ? ['admin', 'consultant_doctor']
+          : ['admin'];
+
+      if (!req.userRole || !allowedRoles.includes(req.userRole)) {
+        return res.status(403).json({ error: 'Insufficient permissions', code: 'FORBIDDEN' });
       }
 
       if (!config || typeof config !== 'object') {
@@ -229,6 +252,8 @@ router.post(
             },
           ],
         },
+        classroomContent: {},
+        serialDisplayVideo: {},
       };
 
       const validSections = Object.keys(defaults);

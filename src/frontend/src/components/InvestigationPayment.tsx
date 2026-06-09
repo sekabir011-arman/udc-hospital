@@ -668,6 +668,7 @@ function NewPaymentView({
         name: r.name,
         rate: r.rate,
         category: "Imported",
+        discountRate: 0,
       })),
   ];
 

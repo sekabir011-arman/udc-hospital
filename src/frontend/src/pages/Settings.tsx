@@ -1817,6 +1817,7 @@ function toEmbedUrl(raw: string): string {
 
 function SerialDisplayVideoSettings({ doctorEmail }: { doctorEmail: string }) {
   const storageKey = `serialDisplayVideoUrl_${doctorEmail}`;
+  const [backendConfig, setBackendConfig] = useState<Record<string, string>>({});
   const [inputUrl, setInputUrl] = useState("");
   const [savedUrl, setSavedUrl] = useState<string | null>(() =>
     localStorage.getItem(storageKey),
@@ -1827,20 +1828,78 @@ function SerialDisplayVideoSettings({ doctorEmail }: { doctorEmail: string }) {
   });
   const [showPreview, setShowPreview] = useState(false);
 
+  const fetchBackendConfig = async () => {
+    try {
+      const backendUrl = import.meta.env.VITE_API_URL || "http://localhost:3000";
+      const response = await fetch(`${backendUrl}/api/config/serialDisplayVideo`, {
+        method: "GET",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as Record<string, unknown>;
+      const payload = data.serialDisplayVideo as Record<string, string> | undefined;
+      if (payload) {
+        setBackendConfig(payload);
+        const backendUrlForDoctor = payload[doctorEmail];
+        if (!localStorage.getItem(storageKey) && backendUrlForDoctor) {
+          localStorage.setItem(storageKey, backendUrlForDoctor);
+          setSavedUrl(backendUrlForDoctor);
+          setPreviewUrl(toEmbedUrl(backendUrlForDoctor));
+        }
+      }
+    } catch (err) {
+      console.warn("[serialDisplay] Failed to load backend serial display config:", err);
+    }
+  };
+
+  const persistBackendConfig = async (nextConfig: Record<string, string>) => {
+    try {
+      const token = localStorage.getItem("auth_token");
+      if (!token) {
+        return;
+      }
+      const backendUrl = import.meta.env.VITE_API_URL || "http://localhost:3000";
+      await fetch(`${backendUrl}/api/config/serialDisplayVideo`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          config: nextConfig,
+          reason: "Updated serial display video URL",
+        }),
+      });
+      setBackendConfig(nextConfig);
+    } catch (err) {
+      console.warn("[serialDisplay] Failed to persist backend config:", err);
+    }
+  };
+
+  useEffect(() => {
+    void fetchBackendConfig();
+  }, [doctorEmail]);
+
   const handleSave = () => {
     if (!inputUrl.trim()) {
       toast.error("Please enter a video URL");
       return;
     }
     const embed = toEmbedUrl(inputUrl.trim());
-    localStorage.setItem(storageKey, inputUrl.trim());
+    const nextSavedUrl = inputUrl.trim();
+    const nextBackendConfig = {
+      ...backendConfig,
+      [doctorEmail]: nextSavedUrl,
+    };
+    localStorage.setItem(storageKey, nextSavedUrl);
+    void persistBackendConfig(nextBackendConfig);
     // Broadcast change to other tabs (including SerialDisplay)
     try {
       const bc = new BroadcastChannel("serial_display_video_sync");
-      bc.postMessage({ videoUrl: inputUrl.trim() });
+      bc.postMessage({ videoUrl: nextSavedUrl });
       bc.close();
     } catch {}
-    setSavedUrl(inputUrl.trim());
+    setSavedUrl(nextSavedUrl);
     setPreviewUrl(embed);
     setShowPreview(true);
     setInputUrl("");
@@ -1848,7 +1907,10 @@ function SerialDisplayVideoSettings({ doctorEmail }: { doctorEmail: string }) {
   };
 
   const handleClear = () => {
+    const nextBackendConfig = { ...backendConfig };
+    delete nextBackendConfig[doctorEmail];
     localStorage.removeItem(storageKey);
+    void persistBackendConfig(nextBackendConfig);
     try {
       const bc = new BroadcastChannel("serial_display_video_sync");
       bc.postMessage({ videoUrl: null });
@@ -2929,15 +2991,7 @@ function AccountPanel({
 function Footer() {
   return (
     <p className="text-xs text-muted-foreground text-center mt-8">
-      © {new Date().getFullYear()}. Built with ❤ using{" "}
-      <a
-        href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="hover:text-primary transition-colors"
-      >
-        caffeine.ai
-      </a>
+      © {new Date().getFullYear()}. Built with ❤ on the Arman Care platform.
     </p>
   );
 }

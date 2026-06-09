@@ -1,138 +1,132 @@
-# Dr. Arman Care App
+# Clinic Care Platform
 
-## Project Overview
+## Overview
 
-This repository powers a clinical care platform with multiple user roles, patient management, appointment workflows, vitals tracking, and staff/admin dashboards.
+A Supabase-backed clinical care application with separate frontend and backend stacks.
+It supports staff and patient workflows, role-based access control, appointment and admission management, vitals tracking, prescriptions, billing, and configurable branding for any clinic or hospital.
 
-The application is split into:
-- `src/backend` — Express-style API routes, Supabase integration, role-based authorization
-- `src/frontend` — React + TypeScript UI, role-aware page rendering, patient reminders, clinical tools
+The repo structure is:
+- `src/backend` — Express API, Supabase integration, JWT authentication, server-side role enforcement
+- `src/frontend` — React + TypeScript + Vite UI, role-aware rendering, patient portal, and administrative tools
+- `src/backend/supabase/migrations` — current Supabase SQL schema and site configuration
 
-## User Roles and Responsibilities
+## Current Architecture
 
-### 1. Admin
-- Full access to configuration and audit features
-- Can manage site settings, emergency contact data, and backend-protected sections
-- Treated as a full clinical/admin role in permission checks
-- Backend enforcement: `requireRole('admin')`
+- Supabase stores users, profiles, patients, visits, vitals, appointments, prescriptions, and site configuration.
+- Backend auth is implemented in `src/backend/src/routes/auth.ts` with JWT issuance.
+- API authorization is enforced in `src/backend/src/middleware/auth.ts` using `authMiddleware` and `requireRole(...)`.
+- Frontend UI permissions are mapped in `src/frontend/src/hooks/useRolePermissions.tsx`.
+- Current production-ready schema files are:
+  - `src/backend/supabase/migrations/001_init_schema.sql`
+  - `src/backend/supabase/migrations/002_site_config.sql`
 
-### 2. Consultant / Doctor Roles
-These are senior clinical roles with broad decision-making authority:
+## Roles and Permissions
+
+### Backend-recognized roles
+- `admin`
 - `consultant_doctor`
 - `doctor`
 - `assistant_professor`
 - `associate_professor`
 - `professor`
-
-Common capabilities:
-- Diagnose patients
-- Prescribe and finalize prescriptions
-- Discharge patients
-- Approve intern notes and review clinical work
-- Manage admissions and bed assignments
-- Can view and act on most patient records
-
-### 3. Medical Officer
 - `medical_officer`
-- Clinical user who can diagnose, prescribe, record vitals, and manage admissions in a partial capacity
-- Can verify and complete orders, but has fewer override privileges than consultants
-
-### 4. Registrar / Assistant Registrar
+- `intern_doctor`
+- `nurse`
 - `registrar`
 - `assistant_registrar`
-- Administrative clinical user with broad patient-view access
-- Can approve intern work, manage beds and admissions, and support patient flow
-- Registrar has the highest non-admin hospital workflow access
-
-### 5. Intern Doctor
-- `intern_doctor`
-- Junior clinical role
-- Can record clinical notes, draft prescriptions, and enter vitals
-- Cannot finalize prescriptions, discharge patients, or approve senior work
-
-### 6. Nurse
-- `nurse`
-- Focused on nursing workflows, medication administration, vitals recording, and nursing notes
-- Can complete orders and record medication administration status
-
-### 7. Reception / Staff
 - `reception`
 - `staff`
-- Front desk and operational roles responsible for:
-  - Patient registration
-  - Appointment scheduling
-  - Billing and administrative support
-  - Basic patient record access (not clinical decision-making)
-
-### 8. Patient
 - `patient`
-- Can access patient-facing features like reminders, consent forms, and their own data
-- No clinical or administrative permissions in the staff workflow
 
-## Permission Model
+### High-level role responsibilities
+- `admin`: superuser access for configuration, audit, and protected routes
+- Consultant / senior doctors (`consultant_doctor`, `doctor`, `assistant_professor`, `associate_professor`, `professor`): diagnosis, prescription, admission, final approval, and clinical oversight
+- `medical_officer`: clinical work with partial admission and order verification responsibilities
+- `intern_doctor`: draft clinical entries, vitals, and notes with limited finalization rights
+- `nurse`: medication administration, nursing notes, vitals recording, and order completion
+- `registrar` / `assistant_registrar`: patient flow, bed/admission management, and broad patient access within the hospital
+- `reception` / `staff`: registration, appointment scheduling, billing, and non-clinical operational support
+- `patient`: portal-only access for own records, reminders, consent forms, and history
 
-The frontend uses `src/frontend/src/hooks/useRolePermissions.tsx` to map each `StaffRole` into a `RolePermissions` object.
+### Permission enforcement
+- Server-side protection: `src/backend/src/middleware/auth.ts`
+- Frontend permission rules: `src/frontend/src/hooks/useRolePermissions.tsx`
+- Role aliases are normalized on login to ensure consistent `role` values in JWTs
 
-Key permission categories include:
-- `canPrescribe`
-- `canDiagnose`
-- `canDischarge`
-- `canAdministerMeds`
-- `canRecordVitals`
-- `canRegisterPatients`
-- `canManageBilling`
-- `canViewAllPatients`
-- `canViewAuditTrail`
-- `canManageAdmissions`
+## Schema and Data Model
 
-`admin` is treated as a superuser, while `patient` is the most restricted role.
+Current database schema is defined in the Supabase migrations.
+The supported schema includes:
+- `users`
+- `patients`
+- `visits`
+- `vitals`
+- `appointments`
+- `prescriptions`
+- site configuration and audit tables
 
-## Auth and Authorization
+This repository is aligned around a single Supabase-backed schema; legacy duplicate canister/ICP architecture is not part of the recommended production deployment path.
 
-### Backend
-- Backend auth is managed in `src/backend/src/routes/auth.ts`
-- Supported role values:
-  - `patient`, `nurse`, `intern`, `medical_officer`, `registrar`, `consultant`, `reception`, `admin`
-- JWTs are generated with `sub`, `email`, and `role` claims
-- Middleware in `src/backend/src/middleware/auth.ts` sets `req.userId` and `req.userRole`
-- Authorization is enforced with `requireRole(...)`
+## Frontend Branding and Customization
 
-### Frontend
-- Frontend role-aware UI is built around `src/frontend/src/hooks/useRolePermissions.tsx`
-- Current auth context is handled in `src/frontend/src/hooks/useEmailAuth.tsx`
-- That hook stores registrations and session state in localStorage for doctor/staff and patient accounts
-- Patient and doctor user flows are distinct, and the app uses role-based UI gating to show appropriate panels
+The hero title and organization branding are customizable.
+Update visible brand text in frontend UI files such as:
+- `src/frontend/src/pages/LandingPage.tsx`
+- `src/frontend/src/pages/Settings.tsx`
+- `API_CONFIG_REFERENCE.md` for config-driven tagline fields
 
-## What This Means in Practice
+Replace the default `Dr. Arman Care` branding with your clinic or hospital name to make the app organization-specific.
 
-- Clinical workflows are separated by role: doctors and nurses see different tools than reception staff
-- Senior users can finalize and approve work that junior users can only draft
-- Admin users can edit configuration and access protected audit/config routes
-- Patients can use reminder and patient portal features without clinical staff privileges
-
-## How to Run
+## Running Locally
 
 From the repository root:
-- `pnpm install --prefer-offline`
-- `pnpm build`
+1. `pnpm install --prefer-offline`
+2. `pnpm build`
+3. `pnpm typecheck`
 
-If you need backend-only commands:
-- `cd src/backend && mops install`
-- `cd src/backend && mops build`
+Frontend dev server:
+- `cd src/frontend && pnpm dev`
 
-## Notes
+Backend dev server:
+- `cd src/backend && pnpm dev`
 
-- The current repository includes both a backend JWT auth implementation and a frontend localStorage-based auth implementation.
-- The role system is rich and supports many clinical titles, but the app still relies on local session state in the frontend for the visible patient/doctor portal flows.
+### Environment variables
+
+Frontend (`src/frontend`):
+- `VITE_SUPABASE_URL`
+- `VITE_SUPABASE_ANON_KEY`
+
+Backend (`src/backend`):
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_KEY`
+- `JWT_SECRET`
+- `JWT_EXPIRY`
+- `API_PORT` (optional)
+
+Copy `src/backend/.env.example` to `.env` and replace placeholder values with your Supabase project credentials.
+
+## Vercel Deployment
+
+The current Vercel config at the repository root is configured for frontend deployment only.
+To deploy the frontend on Vercel:
+- Set `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` in Vercel environment variables.
+- Use the build command: `cd src/frontend && pnpm install --prefer-offline && pnpm build`
+- Output directory: `src/frontend/dist`
+
+If you want a full production deployment, host the backend separately on a Node-capable service or convert the API into Vercel serverless functions. Backend deployment requires:
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_KEY`
+- `JWT_SECRET`
+- `JWT_EXPIRY`
 
 ## Useful Files
 
-- `src/backend/src/middleware/auth.ts` — role-based authorization helper
-- `src/backend/src/routes/auth.ts` — login/signup with role assignment
-- `src/frontend/src/types/index.ts` — role definitions and labels
-- `src/frontend/src/hooks/useRolePermissions.tsx` — permission mapping by role
-- `src/frontend/src/hooks/useEmailAuth.tsx` — auth/session management for staff and patients
+- `src/backend/src/middleware/auth.ts` — JWT auth middleware and role guards
+- `src/backend/src/routes/auth.ts` — login/signup routes with Supabase-backed profile creation
+- `src/frontend/src/types/index.ts` — staff and patient role definitions
+- `src/frontend/src/hooks/useRolePermissions.tsx` — role-to-permission mapping
+- `src/frontend/src/hooks/useEmailAuth.tsx` — frontend session/auth management for portal flows
 
 ---
 
-This README is designed to help you understand who each user in your app is and what they can do.
+This README is intended to reflect the current Supabase-based app architecture, align role enforcement with the backend system, and provide clear, production-friendly run and deployment instructions.

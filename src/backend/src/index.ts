@@ -9,6 +9,9 @@ import appointmentsRoutes from './routes/appointments.js';
 import prescriptionsRoutes from './routes/prescriptions.js';
 import nurseAssignmentsRoutes from './routes/nurseAssignments.js';
 import configRoutes from './routes/config.js';
+import serialQueueRoutes from './routes/serialQueue.js';
+import receiptsRoutes from './routes/receipts.js';
+import publicBookingsRoutes from './routes/publicBookings.js';
 import { authMiddleware } from './middleware/auth.js';
 
 dotenv.config();
@@ -38,6 +41,9 @@ app.use('/api/vitals', authMiddleware, vitalsRoutes);
 app.use('/api/appointments', authMiddleware, appointmentsRoutes);
 app.use('/api/prescriptions', authMiddleware, prescriptionsRoutes);
 app.use('/api/nurse-assignments', authMiddleware, nurseAssignmentsRoutes);
+app.use('/api/serial-queue', authMiddleware, serialQueueRoutes);
+app.use('/api/receipts', authMiddleware, receiptsRoutes);
+app.use('/api/public-bookings', publicBookingsRoutes); // Public bookings is partially public
 
 // Error handling
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {

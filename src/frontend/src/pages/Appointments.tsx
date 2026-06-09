@@ -60,6 +60,9 @@ import {
   useCreatePatient,
   useGetAllPatients,
 } from "../hooks/useQueries";
+import { useSerialQueue } from "../hooks/useSerialQueue";
+import { useReceipts } from "../hooks/useReceipts";
+import { usePublicBookings } from "../hooks/usePublicBookings";
 import { enqueueSync } from "../lib/hybridStorage";
 import { buildFollowUpMessage } from "../lib/whatsappTemplates";
 
@@ -494,74 +497,72 @@ const apptStatusConfig: Record<
 // ─── Doctor Serial Tab ────────────────────────────────────────────────────────
 
 function DoctorSerialTab() {
-  const [serials, setSerials] = useState<SerialEntry[]>(loadSerials);
+  const { entries, loading, error, fetchTodayQueue, addEntry, updateStatus, deleteEntry, resetQueue } = useSerialQueue();
   const [addOpen, setAddOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const [form, setForm] = useState({ name: "", phone: "" });
   const { currentDoctor } = useEmailAuth();
   const isDoctor = !currentDoctor || currentDoctor.role === "doctor";
 
-  const persist = (data: SerialEntry[]) => {
-    setSerials(data);
-    saveSerials(data);
-    const nowServing = data.find((s) => s.status === "in-progress") || null;
-    const queue = data.filter((s) => s.status === "waiting");
-    localStorage.setItem(
-      "medicare_serial_queue",
-      JSON.stringify({ nowServing, queue }),
-    );
-  };
+  // Load queue on mount
+  useEffect(() => {
+    fetchTodayQueue();
+  }, [fetchTodayQueue]);
 
-  function addSerial() {
+  async function addSerial() {
     if (!form.name.trim()) {
       toast.error("Patient name is required");
       return;
     }
-    const next =
-      serials.length > 0 ? Math.max(...serials.map((s) => s.serial)) + 1 : 1;
-    const entry: SerialEntry = {
-      id: uid(),
-      serial: next,
-      patientName: form.name.trim(),
-      phone: form.phone.trim(),
-      arrivalTime: nowTime(),
-      status: "waiting",
-    };
-    persist([...serials, entry]);
-    setForm({ name: "", phone: "" });
-    setAddOpen(false);
-    toast.success(`Serial #${next} added for ${entry.patientName}`);
-    syncQueueEntryToCanister("create", entry);
-  }
-
-  function updateStatus(id: string, status: SerialStatus) {
-    const updated = serials.map((s) => (s.id === id ? { ...s, status } : s));
-    persist(updated);
-    const entry = updated.find((s) => s.id === id);
-    if (entry) syncQueueEntryToCanister("update", entry);
-  }
-
-  function deleteSerial(id: string) {
-    const entry = serials.find((s) => s.id === id);
-    persist(serials.filter((s) => s.id !== id));
-    toast.success("Serial removed");
-    if (entry) syncQueueEntryToCanister("delete", entry);
-  }
-
-  function resetQueue() {
-    // Delete all current entries from canister before clearing
-    for (const entry of serials) {
-      syncQueueEntryToCanister("delete", entry);
+    try {
+      const next = entries.length > 0 ? Math.max(...entries.map((s) => s.serialNumber)) + 1 : 1;
+      await addEntry({
+        patientName: form.name.trim(),
+        phone: form.phone.trim(),
+        serialNumber: next,
+        status: "waiting",
+        queueDate: todayStr(),
+      });
+      setForm({ name: "", phone: "" });
+      setAddOpen(false);
+      toast.success(`Serial #${next} added for ${form.name.trim()}`);
+    } catch (err) {
+      toast.error("Failed to add serial");
     }
-    persist([]);
-    setResetOpen(false);
-    toast.success("Queue reset for today");
+  }
+
+  async function handleUpdateStatus(id: string, status: SerialStatus) {
+    try {
+      await updateStatus(id, status);
+      toast.success("Status updated");
+    } catch (err) {
+      toast.error("Failed to update status");
+    }
+  }
+
+  async function handleDeleteSerial(id: string) {
+    try {
+      await deleteEntry(id);
+      toast.success("Serial removed");
+    } catch (err) {
+      toast.error("Failed to remove serial");
+    }
+  }
+
+  async function handleResetQueue() {
+    try {
+      await resetQueue(todayStr());
+      setResetOpen(false);
+      toast.success("Queue reset for today");
+    } catch (err) {
+      toast.error("Failed to reset queue");
+    }
   }
 
   const counts = {
-    waiting: serials.filter((s) => s.status === "waiting").length,
-    inProgress: serials.filter((s) => s.status === "in-progress").length,
-    done: serials.filter((s) => s.status === "done").length,
+    waiting: entries.filter((s) => s.status === "waiting").length,
+    inProgress: entries.filter((s) => s.status === "in-progress").length,
+    done: entries.filter((s) => s.status === "done").length,
   };
 
   const todayLabel = new Date().toLocaleDateString("en-BD", {
@@ -570,6 +571,16 @@ function DoctorSerialTab() {
     month: "long",
     day: "numeric",
   });
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center text-destructive">
+        <AlertCircle className="w-10 h-10 mb-3" />
+        <p className="font-medium">Failed to load queue</p>
+        <p className="text-sm mt-1">{error}</p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -599,6 +610,7 @@ function DoctorSerialTab() {
             onClick={() => setResetOpen(true)}
             className="gap-1.5 text-destructive border-destructive/30 hover:bg-destructive/10"
             data-ocid="serial.reset_button"
+            disabled={loading}
           >
             <RefreshCcw className="w-3.5 h-3.5" />
             Reset Queue
@@ -608,6 +620,7 @@ function DoctorSerialTab() {
             className="gap-1.5"
             onClick={() => setAddOpen(true)}
             data-ocid="serial.open_modal_button"
+            disabled={loading}
           >
             <Plus className="w-4 h-4" />
             Add Serial
@@ -633,7 +646,11 @@ function DoctorSerialTab() {
         </div>
       </div>
 
-      {serials.length === 0 ? (
+      {loading && entries.length === 0 ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : entries.length === 0 ? (
         <div
           className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground"
           data-ocid="serial.empty_state"
@@ -669,7 +686,7 @@ function DoctorSerialTab() {
             </thead>
             <tbody>
               <AnimatePresence>
-                {serials.map((s, idx) => (
+                {entries.map((s, idx) => (
                   <motion.tr
                     key={s.id}
                     initial={{ opacity: 0, x: -8 }}
@@ -681,7 +698,7 @@ function DoctorSerialTab() {
                   >
                     <td className="px-4 py-3">
                       <span className="inline-flex items-center justify-center w-7 h-7 rounded-full bg-primary/10 text-primary font-bold text-xs">
-                        {s.serial}
+                        {s.serialNumber}
                       </span>
                     </td>
                     <td className="px-4 py-3 font-medium text-foreground">
@@ -691,7 +708,7 @@ function DoctorSerialTab() {
                       {s.phone || "—"}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                      {s.arrivalTime}
+                      {s.addedAt ? new Date(s.addedAt).toLocaleTimeString("en-BD") : "—"}
                     </td>
                     <td className="px-4 py-3">
                       <Badge
@@ -708,7 +725,7 @@ function DoctorSerialTab() {
                             size="sm"
                             variant="ghost"
                             className="h-7 px-2 text-blue-600 hover:bg-blue-50 text-xs"
-                            onClick={() => updateStatus(s.id, "in-progress")}
+                            onClick={() => handleUpdateStatus(s.id, "in-progress")}
                             data-ocid={`serial.secondary_button.${idx + 1}`}
                           >
                             Start
@@ -719,7 +736,7 @@ function DoctorSerialTab() {
                             size="sm"
                             variant="ghost"
                             className="h-7 px-2 text-emerald-600 hover:bg-emerald-50 text-xs"
-                            onClick={() => updateStatus(s.id, "done")}
+                            onClick={() => handleUpdateStatus(s.id, "done")}
                             data-ocid={`serial.primary_button.${idx + 1}`}
                           >
                             <CheckCircle2 className="w-3.5 h-3.5 mr-1" />
@@ -730,7 +747,7 @@ function DoctorSerialTab() {
                           size="sm"
                           variant="ghost"
                           className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10"
-                          onClick={() => deleteSerial(s.id)}
+                          onClick={() => handleDeleteSerial(s.id)}
                           data-ocid={`serial.delete_button.${idx + 1}`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
@@ -783,7 +800,7 @@ function DoctorSerialTab() {
             >
               Cancel
             </Button>
-            <Button onClick={addSerial} data-ocid="serial.submit_button">
+            <Button onClick={addSerial} data-ocid="serial.submit_button" disabled={loading}>
               Add to Queue
             </Button>
           </DialogFooter>
@@ -800,7 +817,7 @@ function DoctorSerialTab() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground">
-            This will clear all {serials.length} serial entries for today.
+            This will clear all {entries.length} serial entries for today.
           </p>
           <DialogFooter>
             <Button
@@ -812,8 +829,9 @@ function DoctorSerialTab() {
             </Button>
             <Button
               variant="destructive"
-              onClick={resetQueue}
+              onClick={handleResetQueue}
               data-ocid="serial.confirm_button"
+              disabled={loading}
             >
               Reset Queue
             </Button>

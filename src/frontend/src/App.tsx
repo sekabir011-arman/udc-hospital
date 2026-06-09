@@ -583,6 +583,7 @@ function PatientAuthContent() {
   const [suRegNo, setSuRegNo] = useState("");
   const [suError, setSuError] = useState("");
   const [suSuccess, setSuSuccess] = useState("");
+  const handleTabChange = (value: string) => setTab(value as "signin" | "signup");
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();

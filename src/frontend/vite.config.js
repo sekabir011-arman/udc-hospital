@@ -1,10 +1,6 @@
 import { fileURLToPath, URL } from "url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
-import environment from "vite-plugin-environment";
-
-process.env.STORAGE_GATEWAY_URL =
-  process.env.STORAGE_GATEWAY_URL || "https://blob.caffeine.ai";
 
 export default defineConfig({
   logLevel: "error",
@@ -12,11 +8,6 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: false,
     minify: false,
-  },
-  define: {
-    "import.meta.env.STORAGE_GATEWAY_URL": JSON.stringify(
-      process.env.STORAGE_GATEWAY_URL,
-    ),
   },
   css: {
     postcss: "./postcss.config.js",
@@ -36,10 +27,7 @@ export default defineConfig({
       },
     },
   },
-  plugins: [
-    environment(["STORAGE_GATEWAY_URL"]),
-    react(),
-  ],
+  plugins: [react()],
   resolve: {
     alias: [
       {
@@ -51,6 +39,5 @@ export default defineConfig({
         replacement: fileURLToPath(new URL("./src", import.meta.url)),
       },
     ],
-    dedupe: ["@dfinity/agent"]
   },
 });

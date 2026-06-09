@@ -1546,15 +1546,7 @@ export default function Layout({ children, currentPageName }: LayoutProps) {
         <footer className="hidden md:block border-t border-border bg-card">
           <div className="max-w-6xl mx-auto px-6 py-3">
             <p className="text-xs text-muted-foreground text-center">
-              © {new Date().getFullYear()}. Built with ❤ using{" "}
-              <a
-                href={`https://caffeine.ai?utm_source=caffeine-footer&utm_medium=referral&utm_content=${encodeURIComponent(window.location.hostname)}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:text-primary transition-colors"
-              >
-                caffeine.ai
-              </a>
+              © {new Date().getFullYear()}. Built with ❤ using the Arman Care platform.
             </p>
           </div>
         </footer>
